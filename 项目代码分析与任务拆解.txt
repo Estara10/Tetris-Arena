@@ -1,0 +1,845 @@
+# Python 俄罗斯方块项目代码分析与任务拆解
+
+分析时间：2026-03-25
+分析方式：基于当前工作区源码做静态代码分析，未实际启动 Pygame 窗口。
+
+==================================================
+第一部分：项目整体架构分析
+==================================================
+
+一、项目可以拆解为几个核心模块？
+
+如果按“职责”来拆，这个项目目前可以拆成 8 个一级功能模块：
+
+1. 应用入口与菜单控制模块
+2. 对战会话编排模块
+3. 单棋盘核心规则模块
+4. 方块模型与发牌模块
+5. 玩家输入控制模块
+6. AI 决策与执行模块
+7. 渲染与界面显示模块
+8. 配置与模式定义模块
+
+如果按“代码文件”来拆，当前主要代码模块有 14 个：
+
+1. `main.py`
+2. `app_controller.py`
+3. `versus_match.py`
+4. `game_core.py`
+5. `tetromino.py`
+6. `piece_sequence.py`
+7. `player_input.py`
+8. `ai_controller.py`
+9. `render.py`
+10. `settings.py`
+11. `game_modes.py`
+12. `menu_screens.py`
+13. `background.py`
+14. `ui_fonts.py`
+
+其中真正的主干是：
+`main.py -> app_controller.py -> versus_match.py -> game_core.py / ai_controller.py / render.py`
+
+二、核心模块识别与职责归纳
+
+1. `main.py`
+作用：项目最外层启动入口。
+说明：只做一件事，导入 `app_controller.main()` 并运行，本身不承担实际游戏逻辑。
+
+2. `app_controller.py`
+作用：应用总控制器。
+主要职责：
+- 初始化 Pygame、窗口、时钟和菜单字体
+- 根据显示器尺寸动态生成适合双屏对战的配置
+- 管理菜单状态、模式切换、开始对战、重开对战、返回菜单
+- 实现应用级主循环
+- 分发全局输入事件
+
+关键位置：
+- `build_match_config()`：为双棋盘模式自动调整尺寸
+- `TetrisApp.run()`：应用主循环
+- `TetrisApp._handle_event()`：全局事件入口
+- `TetrisApp._render_frame()`：每帧更新与绘制调度
+
+3. `versus_match.py`
+作用：封装“一局玩家 vs AI 对战”。
+主要职责：
+- 创建左右两个棋盘区域
+- 创建玩家和 AI 各自的 `GameCore`
+- 创建共享发牌器，保证双方拿到相同方块顺序
+- 挂接玩家输入控制器和 AI 控制器
+- 每帧同时更新玩家、AI、背景、比赛状态
+- 绘制双棋盘、模式信息和结算结果
+- 在挑战模式里动态调整 AI 难度
+
+这是项目里真正的“对局编排中心”。
+
+4. `game_core.py`
+作用：单个棋盘的核心规则引擎。
+主要职责：
+- 初始化网格、分数、当前方块、下一个方块
+- 驱动自动下落
+- 固化方块到网格
+- 判断消行
+- 计算得分
+- 生成下一个方块
+- 维护游戏状态：`RUNNING / PAUSED / GAME_OVER`
+
+这个模块不负责“画图”，也不负责“AI 决策”，只负责规则。
+
+5. `tetromino.py`
+作用：方块数据模型与基础几何操作。
+主要职责：
+- 定义 7 种经典方块形状
+- 保存方块的矩阵、坐标、形状名
+- 提供旋转逻辑
+- 提供碰撞检测
+- 提供预测落点（Ghost Piece 所需）
+
+它是“方块行为原语”模块，玩家和 AI 都会复用这里的能力。
+
+6. `piece_sequence.py`
+作用：同步发牌模块。
+主要职责：
+- 用 `7-bag` 算法生成更平滑的随机方块序列
+- 给玩家和 AI 分发完全同步的方块顺序
+- 通过 `make_piece_factory()` 把发牌器接入 `GameCore`
+
+它解决的是“公平性”问题，而不是玩法规则问题。
+
+7. `player_input.py`
+作用：玩家输入映射层。
+主要职责：
+- 将按键翻译成“左移 / 右移 / 旋转 / 软降 / 硬降”
+- 调用 `GameCore` 和 `Tetromino` 提供的规则接口
+- 当前版本只支持“按下一次触发一次”，没有长按自动横移
+
+它是输入层，不保存棋盘状态。
+
+8. `ai_controller.py`
+作用：AI 决策与动作执行模块。
+主要职责：
+- 分析当前棋盘和方块
+- 枚举候选落点
+- 评估每个落点的局面质量
+- 结合 `next_piece` 做一层前瞻
+- 选出最优方案
+- 按“旋转 -> 横移 -> 硬降”的顺序一步步执行
+
+这是对战功能的核心智能模块。
+
+9. `render.py`
+作用：单棋盘渲染模块。
+主要职责：
+- 绘制背景叠层、网格线、已锁定方块、活动方块、Ghost Piece
+- 绘制右侧 UI 面板
+- 显示得分、消行、下一个方块
+- 显示暂停 / 游戏结束覆盖层
+
+可以理解为“游戏画面绘制器”。
+
+10. `settings.py`
+作用：集中配置中心。
+主要职责：
+- 集中存放屏幕尺寸、格子尺寸、帧率、下落速度、颜色、字体、计分映射等配置
+- 支持环境变量覆盖
+- 支持根据目标窗口尺寸自动反推合适的格子大小
+
+11. `game_modes.py`
+作用：模式和 AI 难度数据定义。
+主要职责：
+- 定义 `CLASSIC` 和 `CHALLENGE` 两种模式
+- 定义 `EASY / NORMAL / HARD` 三档 AI
+- 存储模式文案、目标行数、AI 节奏和失误率
+
+12. `menu_screens.py`
+作用：菜单界面绘制模块。
+主要职责：
+- 绘制模式选择菜单
+- 绘制经典模式 AI 难度菜单
+- 提供渐变背景、卡片、按钮条、文本布局等 UI 绘制函数
+
+13. `background.py`
+作用：滚动背景模块。
+主要职责：
+- 加载背景图片
+- 在背景图缺失时回退到纯色背景
+- 每帧更新偏移量，实现循环滚动效果
+
+14. `ui_fonts.py`
+作用：字体适配模块。
+主要职责：
+- 优先尝试常见中文字体
+- 为菜单和游戏 UI 构造合适字号
+- 避免中文显示成方块
+
+三、模块调用与依赖关系图
+
+```mermaid
+flowchart TD
+    A[main.py] --> B[app_controller.py]
+
+    B --> C[game_modes.py]
+    B --> D[menu_screens.py]
+    B --> E[settings.py]
+    B --> F[ui_fonts.py]
+    B --> G[versus_match.py]
+
+    G --> H[player_input.py]
+    G --> I[ai_controller.py]
+    G --> J[render.py]
+    G --> K[background.py]
+    G --> L[piece_sequence.py]
+    G --> M[game_core.py]
+    G --> C
+    G --> F
+
+    M --> N[tetromino.py]
+    M --> E
+
+    H --> M
+    I --> N
+    I --> E
+    J --> E
+    J --> F
+    L --> N
+    L --> E
+    D --> C
+    D --> E
+    K --> E
+```
+
+四、架构理解总结
+
+这个项目不是“所有逻辑都堆在 `main.py` 里”的单文件脚本，而是已经有比较清晰的分层：
+
+- `app_controller.py` 负责“应用级调度”
+- `versus_match.py` 负责“单局对战编排”
+- `game_core.py` 负责“单棋盘规则”
+- `tetromino.py` 负责“方块几何与碰撞”
+- `ai_controller.py` 负责“AI 搜索与决策”
+- `render.py` 负责“显示输出”
+
+这说明项目已经从“原型脚本”升级成了一个小型的、职责较清晰的游戏程序。
+
+==================================================
+第二部分：核心游戏流程分析
+==================================================
+
+一、输入（Input）：玩家通过哪些方式控制游戏？
+
+1. 玩家输入方式
+
+当前玩家通过键盘控制游戏：
+
+- `Left`：左移
+- `Right`：右移
+- `Down`：软降
+- `Up`：旋转
+- `Space`：硬降
+- `P`：暂停 / 恢复
+- `R`：重开当前对局
+- `M`：返回菜单
+- `Esc`：退出程序
+
+2. 输入在哪些模块中处理？
+
+输入处理分成三层：
+
+第一层：`app_controller.py`
+- `TetrisApp.run()` 中读取 `pygame.event.get()`
+- `TetrisApp._handle_event()` 负责全局分流
+- `Esc / R / M / 菜单按键` 都是在这里决定走向
+
+第二层：`versus_match.py`
+- `VersusMatch.handle_keydown()` 负责比赛内按键
+- `P` 在这里切换暂停
+- 其他玩家操作继续转交给 `PlayerInputController`
+
+第三层：`player_input.py`
+- `PlayerInputController.handle_keydown()` 把方向键和空格翻译成具体动作
+
+补充说明：
+- `GameCore.handle_input()` 里也保留了一套输入处理逻辑，但从当前运行路径看，它更像兼容旧写法的保留接口，不是现在双屏对战的主输入入口。
+- `PlayerInputController.handle_keyup()` 和 `update()` 目前是空实现，说明现在没有做长按连发或更复杂的输入缓冲。
+
+二、核心逻辑（Processing）
+
+1. 游戏主循环（Game Loop）在哪里实现？
+
+应用级主循环在：
+`app_controller.py` 的 `TetrisApp.run()`
+
+流程是：
+
+1. `clock.tick(fps)` 计算本帧经过的时间 `dt`
+2. 读取并处理所有 Pygame 事件
+3. 读取当前键盘状态 `pressed_keys`
+4. 调用 `_render_frame(dt, pressed_keys)`
+5. 最后 `pygame.display.flip()` 刷新屏幕
+
+如果当前不在对局中：
+- 绘制菜单界面
+
+如果当前正在对局中：
+- 调用 `VersusMatch.update(dt, pressed_keys)`
+- 再调用 `VersusMatch.draw()`
+
+所以严格来说：
+- 应用主循环在 `app_controller.py`
+- 单局更新循环在 `versus_match.py`
+
+2. 方块的移动、旋转和下落逻辑在哪些文件中处理？
+
+这个逻辑不是只在一个文件中完成，而是分层协作：
+
+（1）玩家动作触发层：`player_input.py`
+- 左右移动：`move_horizontal()`
+- 软降：直接让 `current_piece.y += 1`
+- 旋转：调用 `current_piece.rotate(game_core.grid)`
+- 硬降：调用 `get_drop_position()` 后再 `game_core.lock_shape()`
+
+（2）方块规则层：`tetromino.py`
+- `rotate()`：旋转矩阵并做碰撞预判
+- `check_collision()`：检查是否撞墙、触底、撞到已锁定方块
+- `get_drop_position()`：预测最终落点
+
+（3）自动下落和落地锁定层：`game_core.py`
+- `update(dt)`：根据时间累计自动下落
+- 如果下一格还能下落，就 `y += 1`
+- 如果不能继续下落，就调用 `lock_shape()`
+
+结论：
+- “按键导致的移动/旋转”主要从 `player_input.py` 发起
+- “碰撞与旋转是否合法”由 `tetromino.py` 判断
+- “自动重力下落、锁定、生成新方块”由 `game_core.py` 负责
+
+3. 如何判断一行是否已满，以及如何消除行和计算得分？
+
+该逻辑在 `game_core.py` 的 `clear_lines()` 中实现。
+
+判断方式：
+- 遍历当前网格 `self.grid`
+- 只保留“仍然包含 0 的行”，也就是“还有空格的行”
+- 任何“不包含 0 的行”都被视为满行并移除
+
+实现思路：
+
+1. `new_grid = [row for row in self.grid if 0 in row]`
+   含义：留下未满的行
+
+2. `lines_cleared = self.config.grid_rows - len(new_grid)`
+   含义：原总行数减去剩余行数，得到被消掉的满行数
+
+3. 在顶部插入同样数量的空行
+
+4. 更新：
+- `self.grid`
+- `self.lines_cleared_total`
+- `self.last_cleared_lines`
+- `self.score`
+
+分数计算：
+- 1 行：100
+- 2 行：300
+- 3 行：500
+- 4 行：800
+
+这个映射来自 `settings.py` 的 `score_mapping`。
+
+4. 新方块是如何生成的？
+
+流程在 `game_core.py` 中：
+
+1. 初始化时先创建：
+- `current_piece`
+- `next_piece`
+
+2. 当当前方块锁定后：
+- `lock_shape()` 调用 `spawn_piece()`
+
+3. `spawn_piece()` 做两件事：
+- `current_piece = next_piece`
+- 再新建一个 `next_piece`
+
+4. 如果新生成的 `current_piece` 出生时就碰撞：
+- 状态改为 `GAME_OVER`
+
+在对战模式下，真正的方块来源不是完全随机，而是 `piece_sequence.py` 的同步发牌器。
+
+三、输出（Output）：游戏状态如何显示到屏幕？
+
+1. 总输出入口
+
+比赛画面输出入口在：
+`versus_match.py` 的 `draw()`
+
+它负责：
+- 清空整屏背景
+- 绘制中间分隔区
+- 绘制左边玩家棋盘
+- 绘制右边 AI 棋盘
+- 绘制模式标签
+- 绘制边框
+- 绘制结算浮层
+
+2. 单棋盘显示由哪个模块负责？
+
+单棋盘显示由：
+`render.py` 的 `Render.draw()` 负责
+
+绘制顺序非常清楚：
+
+1. 画背景
+2. 画棋盘半透明遮罩
+3. 画网格线
+4. 画 Ghost Piece
+5. 画已锁定方块
+6. 画当前活动方块
+7. 画右侧 UI 面板
+8. 如果暂停或结束，再加覆盖层文字
+
+3. 屏幕上显示了哪些内容？
+
+`Render.draw_ui()` 会显示：
+
+- 标题（玩家 / AI）
+- 当前得分
+- 当前累计消行数
+- 模式补充信息
+- 下一个方块预览
+- 暂停/结束提示
+
+`VersusMatch.draw()` 额外显示：
+
+- 中间模式 pill 标签
+- 左右棋盘边框
+- 对局结束卡片
+
+4. 背景输出由谁负责？
+
+背景滚动效果由 `background.py` 负责：
+
+- `Background.update()` 更新偏移量
+- `Background.draw()` 绘制滚动背景图
+
+如果图片不存在，就回退成纯色填充。
+
+四、核心流程一图概括
+
+```text
+Pygame 事件
+  -> TetrisApp._handle_event()
+  -> VersusMatch.handle_keydown()/handle_keyup()
+  -> PlayerInputController.handle_keydown()
+  -> Tetromino / GameCore 改变状态
+
+每帧 update:
+  TetrisApp.run()
+  -> VersusMatch.update()
+     -> 更新 AI 配置
+     -> 更新背景
+     -> 玩家输入更新（当前为空扩展点）
+     -> AIController.update()
+     -> player_core.update()
+     -> ai_core.update()
+     -> 更新比赛结果
+
+每帧 draw:
+  TetrisApp._render_frame()
+  -> VersusMatch.draw()
+     -> Render.draw(玩家)
+     -> Render.draw(AI)
+     -> 绘制模式信息/结算层
+```
+
+==================================================
+第三部分：AI 对战功能专项分析（ai_controller.py）
+==================================================
+
+一、AI 的输入（AI 决策时需要哪些信息？）
+
+AI 实际需要的输入主要有 5 类：
+
+1. 当前棋盘布局 `game_core.grid`
+- 用来判断哪里有空位、哪里有堆叠、哪里有空洞
+
+2. 当前活动方块 `game_core.current_piece`
+- 包含方块形状
+- 当前矩阵朝向
+- 当前坐标 `x / y`
+
+3. 下一个方块 `game_core.next_piece`
+- 用于一层前瞻
+- AI 会估计“如果当前这样落，下一个方块能否接得更好”
+
+4. 配置 `config`
+- 需要知道 `grid_cols`、`grid_rows`
+- 需要知道评估时的棋盘尺寸
+
+5. AI 自身参数
+- `action_interval_ms`：多久执行一步动作
+- `mistake_chance`：失误概率
+- `lookahead_weight`：前瞻评分权重
+
+补充：
+在挑战模式中，`versus_match.py` 会根据玩家当前表现实时调整：
+- AI 下落速度
+- AI 行动间隔
+- AI 失误率
+
+因此从更高层看，AI 还间接受到“玩家当前表现”这个外部输入影响。
+
+二、AI 的输出（AI 决策结果是什么？）
+
+AI 的直接输出不是“键盘按键”，而是一份内部落子计划：
+
+1. `rotation_steps`
+- 需要再旋转几次
+
+2. `target_x`
+- 最终要移动到哪一列
+
+3. `last_plan_score`
+- 当前计划的综合评分
+
+在执行阶段，AI 会把这份计划拆成动作序列：
+
+1. 先旋转到目标朝向
+2. 再逐步左移/右移到目标列
+3. 最后直接硬降到底
+
+执行方式也不是模拟按键，而是直接改游戏对象状态：
+
+- 旋转：调用 `piece.rotate(game_core.grid)`
+- 横移：直接改 `piece.x`
+- 硬降：`piece.y = piece.get_drop_position(...)`
+- 锁定：`game_core.lock_shape()`
+
+所以可以把 AI 输出理解为：
+
+最终输出 = “最佳旋转次数 + 最佳目标列”  
+执行输出 = “按计划逐帧控制自己的方块落下”
+
+三、AI 的算法/策略分析
+
+结论先说：
+
+这个 AI 明确不是深度学习，也不是强化学习；
+它是一个“基于启发式评估函数的搜索型 AI”，并带有“一层前瞻”和“可控失误率”。
+
+四、AI 决策的完整思路
+
+1. 枚举当前方块的所有唯一旋转形态
+
+函数：
+- `unique_rotations(matrix)`
+
+含义：
+- 从当前朝向开始，最多转 4 次
+- 去重后得到所有唯一旋转状态
+- 例如 `O` 方块实际上只有 1 种唯一形态
+
+2. 枚举每种旋转下所有可行的横向位置
+
+函数：
+- `valid_x_range(matrix, grid_cols)`
+
+含义：
+- 根据当前矩阵里最左、最右的实心格，算出方块可落入棋盘的合法横坐标范围
+
+3. 模拟每个候选落点的最终落地效果
+
+函数：
+- `generate_candidates(grid, piece, config)`
+- `simulate_lock(grid, piece, config)`
+
+流程：
+
+1. 复制当前方块
+2. 应用某个旋转形态
+3. 设置某个目标 `x`
+4. 如果当前位置一开始就碰撞，则该候选无效
+5. 计算该方块的最终落点 `y`
+6. 模拟把它锁进网格
+7. 计算会消掉几行
+8. 得到落地后的新棋盘
+
+也就是说，AI 不是“凭感觉”判断，而是在穷举可能方案。
+
+4. 对每个候选局面打分
+
+函数：
+- `board_profile(grid)`
+- `evaluate_grid(grid, lines_cleared)`
+
+评估函数核心如下：
+
+总分 =
+- 消行奖励
+- 总堆高惩罚
+- 最高列惩罚
+- 空洞惩罚
+- 表面起伏惩罚
+
+具体权重：
+
+- `lines_cleared * 1500`
+- `aggregate_height * 5.0`
+- `max_height * 18.0`
+- `holes * 56.0`
+- `bumpiness * 11.0`
+
+说明：
+
+- AI 非常重视消行
+- AI 也很讨厌空洞
+- AI 会尽量压低整体高度
+- AI 会尽量避免表面高低差太夸张
+
+这正是典型的俄罗斯方块启发式评分法。
+
+5. 对下一个方块做一层前瞻
+
+函数：
+- `best_future_score(grid, next_piece, config)`
+
+含义：
+- 假设当前候选方案已经落地
+- 再把 `next_piece` 放到这个新局面里
+- 估算“下一个方块能拿到的最好分数”
+
+然后在 `_plan_for_piece()` 中做综合评分：
+
+`total_score = surface_score + future_score * lookahead_weight - target_bias`
+
+其中：
+
+- `surface_score`：当前方块落地后的局面评分
+- `future_score * lookahead_weight`：下一个方块带来的前瞻收益
+- `target_bias`：对过于偏离中线的位置做一点小惩罚
+
+默认前瞻权重：
+- `lookahead_weight = 0.28`
+
+6. 选出评分最高的方案
+
+逻辑：
+
+1. 对所有候选按 `total_score` 降序排序
+2. 默认选第一名
+
+7. 加入“失误概率”，让 AI 不完全机械
+
+逻辑：
+
+如果候选方案不止一个，并且随机数命中 `mistake_chance`：
+- AI 不一定选第一名
+- 会在前 3 名里随机挑一个
+
+效果：
+- 弱档 AI 不会每步都完美
+- 经典模式和挑战模式可以通过调这个值体现难度差异
+
+8. 按计划执行
+
+函数：
+- `AIController._execute_next_action()`
+
+顺序固定为：
+
+1. 旋转
+2. 平移
+3. 硬降
+
+这是一个“离散动作序列执行器”，不是一次性瞬移。
+
+五、AI 核心思想总结
+
+可以用一句话概括：
+
+这个 AI 的核心思想是：
+“枚举当前方块所有可能落点，模拟落地后的棋盘，用启发式评估函数打分，再结合下一个方块做一层前瞻，最后选择综合得分最高的方案执行。”
+
+所以如果要给它贴算法标签，最合适的是：
+
+- 启发式搜索 AI
+- 单步搜索 + 一层前瞻
+- 基于评估函数的落点选择
+
+不是：
+
+- 深度学习
+- 蒙特卡洛树搜索
+- 博弈树对抗算法
+
+六、AI 专项任务拆解
+
+如果后续要继续开发 `ai_controller.py`，可以拆成以下子任务：
+
+1. 候选生成层
+- 枚举旋转
+- 枚举可落列
+- 过滤非法候选
+
+2. 落地模拟层
+- 模拟锁定
+- 模拟消行
+- 生成新网格
+
+3. 局面评估层
+- 统计列高
+- 统计空洞
+- 统计表面起伏
+- 设计评估权重
+
+4. 前瞻层
+- 评估下一块
+- 未来可扩展到两层、三层前瞻
+
+5. 行为执行层
+- 旋转
+- 横移
+- 硬降
+
+6. 难度调节层
+- 动作间隔
+- 失误率
+- 挑战模式自适应
+
+==================================================
+第四部分：面向实现的任务拆解建议
+==================================================
+
+如果从“输入、输出、功能实现”角度重新拆整个程序，我建议拆成下面 8 个开发任务包：
+
+任务包 1：应用启动与主循环
+输入：
+- 启动程序
+- 窗口关闭事件
+- 全局键盘事件
+输出：
+- 菜单画面或对局画面
+- 程序退出
+主要文件：
+- `main.py`
+- `app_controller.py`
+
+任务包 2：菜单与模式选择
+输入：
+- 数字键选择模式
+- 数字键选择 AI 难度
+- `M` 返回菜单
+输出：
+- 当前模式
+- 当前 AI 等级
+- 菜单界面
+主要文件：
+- `app_controller.py`
+- `menu_screens.py`
+- `game_modes.py`
+
+任务包 3：对战会话编排
+输入：
+- 当前模式
+- 当前 AI 档位
+- 屏幕对象
+输出：
+- 玩家棋盘状态
+- AI 棋盘状态
+- 对局结果
+主要文件：
+- `versus_match.py`
+
+任务包 4：单棋盘核心规则
+输入：
+- 当前网格
+- 当前方块
+- 时间增量 `dt`
+- 移动/旋转/下落命令
+输出：
+- 更新后的网格
+- 分数
+- 消行数
+- 游戏状态
+主要文件：
+- `game_core.py`
+- `tetromino.py`
+
+任务包 5：同步发牌机制
+输入：
+- 玩家或 AI 的取块请求
+输出：
+- 同步的方块序列
+主要文件：
+- `piece_sequence.py`
+
+任务包 6：玩家操作控制
+输入：
+- 键盘方向键和空格
+输出：
+- 对当前方块的位置/朝向改变
+主要文件：
+- `player_input.py`
+
+任务包 7：AI 对战控制
+输入：
+- 当前棋盘
+- 当前方块
+- 下一个方块
+- AI 参数
+输出：
+- 最优旋转次数
+- 目标列
+- 实际动作执行
+主要文件：
+- `ai_controller.py`
+
+任务包 8：渲染与视觉输出
+输入：
+- 网格状态
+- 当前方块
+- 分数
+- 下一个方块
+- 模式信息
+输出：
+- 双棋盘游戏画面
+- 菜单界面
+- 背景动画
+主要文件：
+- `render.py`
+- `menu_screens.py`
+- `background.py`
+- `ui_fonts.py`
+
+==================================================
+第五部分：一句话结论
+==================================================
+
+这个项目当前已经不是“简单单机俄罗斯方块”，而是一个包含：
+
+- 应用入口
+- 菜单系统
+- 对战编排
+- 单棋盘规则引擎
+- 同步发牌
+- 玩家输入
+- 启发式 AI
+- 双屏渲染
+
+的完整小型游戏架构。
+
+其中：
+
+- `game_core.py` 是规则核心
+- `tetromino.py` 是方块行为基础
+- `render.py` 是画面输出核心
+- `versus_match.py` 是一局对战的中枢
+- `ai_controller.py` 是 AI 对战的策略核心
+
+如果后续继续扩展，这个结构已经足够支持：
+- 垃圾行攻击
+- 更强多步前瞻 AI
+- 本地双人
+- 排行榜/存档
+- 音效与特效
