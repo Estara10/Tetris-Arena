@@ -68,8 +68,8 @@ class VersusMatch:
             config=self.config,
             action_interval_ms=initial_action_interval,
             mistake_chance=initial_mistake_chance,
-            mode=self.config.ai_controller_mode,
-            model_path=self.config.ai_model_path,
+            mode="model",
+            model_path=__import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "models/next_state/best.pt"),
         )
 
         pygame.font.init()

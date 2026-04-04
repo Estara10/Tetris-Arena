@@ -5,11 +5,18 @@ import random
 import pygame
 
 from ai_controller import generate_candidates
+from dqn_model import load_inference_model
 from game_modes import MatchMode
+from next_state_features import NEXT_STATE_AUX_FEATURE_COUNT, extract_next_state_features
 from piece_sequence import SharedShapeSequence
 from settings import GameConfig
 from shared_game_core import SharedGameCore, ArenaEntity
 from ui_fonts import build_ui_font
+
+try:
+    import torch
+except Exception:  # pragma: no cover
+    torch = None
 
 
 class ArenaAIState:
@@ -29,17 +36,23 @@ class SharedArenaMatch:
 
         self.arena_config = self._build_arena_config(config)
 
-        sides = ["player", "ai1", "ai2"]
-        self.shared_sequence = SharedShapeSequence(self.arena_config, sides=sides)
-        
-        spawns = getattr(self.arena_config, "shared_arena_spawns", [9, 17, 25])
-        while len(spawns) < 3: spawns.append(spawns[-1] + 8)
-
-        self.entities = [
-            ArenaEntity(id="player", is_player=True, spawn_x=spawns[0], piece_factory=self.shared_sequence.make_piece_factory("player")),
-            ArenaEntity(id="ai1", is_player=False, spawn_x=spawns[1], piece_factory=self.shared_sequence.make_piece_factory("ai1")),
-            ArenaEntity(id="ai2", is_player=False, spawn_x=spawns[2], piece_factory=self.shared_sequence.make_piece_factory("ai2")),
-        ]
+        if self.mode.key == "TRADITIONAL":
+            sides = ["player", "ai1"]
+            spawns = [9, 17]
+            self.shared_sequence = SharedShapeSequence(self.arena_config, sides=sides)
+            self.entities = [
+                ArenaEntity(id="player", is_player=True, spawn_x=spawns[0], piece_factory=self.shared_sequence.make_piece_factory("player")),
+                ArenaEntity(id="ai1", is_player=False, spawn_x=spawns[1], piece_factory=self.shared_sequence.make_piece_factory("ai1")),
+            ]
+        else:
+            sides = ["player", "ai1", "ai2"]
+            spawns = [9, 17, 25]
+            self.shared_sequence = SharedShapeSequence(self.arena_config, sides=sides)
+            self.entities = [
+                ArenaEntity(id="player", is_player=True, spawn_x=spawns[0], piece_factory=self.shared_sequence.make_piece_factory("player")),
+                ArenaEntity(id="ai1", is_player=False, spawn_x=spawns[1], piece_factory=self.shared_sequence.make_piece_factory("ai1")),
+                ArenaEntity(id="ai2", is_player=False, spawn_x=spawns[2], piece_factory=self.shared_sequence.make_piece_factory("ai2")),
+            ]
 
         self.core = SharedGameCore(
             config=self.arena_config,
@@ -65,22 +78,38 @@ class SharedArenaMatch:
         self.paused = False
         self.finished = False
 
+        self._player_left_held = False
+        self._player_right_held = False
+        self._player_down_held = False
+
         self.duration_ms = getattr(self.arena_config, "shared_arena_duration_ms", 180000)
         self.remaining_ms = self.duration_ms
 
-        self.base_font = build_ui_font(28)
-        self.large_font = build_ui_font(48)
-        self.small_font = build_ui_font(20)
+        self.base_font = build_ui_font(self.arena_config, 28)
+        self.large_font = build_ui_font(self.arena_config, 48)
+        self.small_font = build_ui_font(self.arena_config, 20)
+        self.model_enabled = self.mode.key == "TRADITIONAL"
+        self._model = None
+        self._model_input_dim = 0
+        self._model_error = ""
+        import os
+        self._model_path = __import__("pathlib").Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/next_state/best.pt"))
 
         # Limits and Timers
         self.cooldown_ms = {
-            "player": getattr(self.arena_config, "shared_arena_player_cooldown_ms", 200),
-            "ai1": getattr(self.arena_config, "shared_arena_ai_cooldown_ms", 300),
-            "ai2": getattr(self.arena_config, "shared_arena_ai_cooldown_ms", 300),
+            "player": 100 if self.mode.key == "TRADITIONAL" else 200,
+            "ai1": 200 if self.mode.key == "TRADITIONAL" else 300,
+            "ai2": 200 if self.mode.key == "TRADITIONAL" else 300,
         }
         self.move_timers = {ent.id: 0 for ent in self.entities}
-        self.gravity_interval_ms = getattr(self.arena_config, "shared_arena_fall_speed_ms", 500)
+        self.gravity_interval_ms = 500
         
+        # 初始撞人权归咱
+        self.push_rights = {ent.id: ent.is_player for ent in self.entities}
+        if self.mode.key != "TRADITIONAL":
+            # 三体版不管撞人权限制
+            self.push_rights = {ent.id: True for ent in self.entities}
+
         self.gravity_accumulators = {ent.id: 0 for ent in self.entities}
         if len(self.entities) > 1:
             self.gravity_accumulators["ai1"] += 90
@@ -96,56 +125,226 @@ class SharedArenaMatch:
 
         self.winner_id = None
 
+        if self.model_enabled:
+            for ent in self.entities:
+                if not ent.is_player:
+                    self.cooldown_ms[ent.id] = max(40, int(self.config.ai_model_action_interval_ms))
+            self._try_load_shared_model()
+
     def _build_arena_config(self, config: GameConfig) -> GameConfig:
+        from dataclasses import replace
+        if self.mode.key == "TRADITIONAL":
+            cols, rows = 25, 25
+            score_on_lock = False
+            score_mapping = {1: 1, 2: 2, 3: 3, 4: 4}
+            duration_ms = 180000 * 999  # 相当于无限制时间，直到溢出
+        else:
+            cols, rows = 33, 25
+            score_on_lock = True
+            score_mapping = {1: 0, 2: 0, 3: 0, 4: 0} # 只有落子得分
+            duration_ms = 180000
+
         return replace(
             config,
-            grid_cols=getattr(config, "shared_arena_grid_cols", 33),
-            grid_rows=getattr(config, "shared_arena_grid_rows", 25),
+            grid_cols=cols,
+            grid_rows=rows,
+            shared_arena_score_on_lock=score_on_lock,
+            score_mapping=score_mapping,
+            shared_arena_duration_ms=duration_ms,
         )
 
-    def handle_event(self, event) -> str | None:
-        if event.type == pygame.KEYDOWN:
-            key = event.key
-            if key in (pygame.K_p, pygame.K_w):
-                self.paused = not self.paused
-                return None
-            if self.paused or self.finished:
-                if self.finished and key == pygame.K_ESCAPE:
-                    return "QUIT"
-                return None
-
-            if key == pygame.K_ESCAPE:
+    def handle_keydown(self, key: int) -> str | None:
+        if self.paused or self.finished:
+            if self.finished and key == pygame.K_ESCAPE:
                 return "QUIT"
-            elif key == pygame.K_a:
-                self._player_left_held = True
-            elif key == pygame.K_d:
-                self._player_right_held = True
-            elif key == pygame.K_l:
-                # Rotate
-                p_ent = self._get_entity("player")
-                if p_ent and p_ent.piece:
-                    self.core.rotate_piece(p_ent.piece)
-            elif key == pygame.K_s:
-                # Hard drop
-                p_ent = self._get_entity("player")
-                if p_ent and p_ent.piece:
-                    self.core.hard_drop_piece(p_ent)
-                    self.move_timers["player"] = self.cooldown_ms["player"] # Delay after hard drop
+            return None
 
-        elif event.type == pygame.KEYUP:
-            key = event.key
-            if key == pygame.K_a:
-                self._player_left_held = False
-            elif key == pygame.K_d:
-                self._player_right_held = False
-
+        if key == pygame.K_ESCAPE:
+            return "QUIT"
+        elif key == pygame.K_a:
+            self._player_left_held = True
+        elif key == pygame.K_d:
+            self._player_right_held = True
+        elif key == pygame.K_s:
+            self._player_down_held = True
+        elif key == pygame.K_l:
+            p_ent = self._get_entity("player")
+            if p_ent and p_ent.piece:
+                self.core.rotate_piece(p_ent.piece)
+        elif key == pygame.K_w:
+            p_ent = self._get_entity("player")
+            if p_ent and p_ent.piece:
+                self.core.hard_drop_piece(p_ent)
+                self.move_timers["player"] = self.cooldown_ms["player"] // 2
         return None
+
+    def handle_keyup(self, key: int):
+        if key == pygame.K_a:
+            self._player_left_held = False
+        elif key == pygame.K_d:
+            self._player_right_held = False
+        elif key == pygame.K_s:
+            self._player_down_held = False
         
     def _get_entity(self, eid: str) -> ArenaEntity | None:
         for e in self.entities:
             if e.id == eid:
                 return e
         return None
+
+    def _soft_drop_or_lock(self, ent: ArenaEntity) -> bool:
+        """Try one soft drop step; lock immediately if the piece is grounded."""
+        moved = self.core.soft_drop_piece(ent)
+        if moved:
+            return True
+
+        piece = ent.piece
+        if piece is None:
+            return False
+        if not self.core.is_valid_position(piece):
+            return False
+
+        self.core.lock_piece(ent)
+        return False
+
+    def _try_load_shared_model(self):
+        if torch is None:
+            self._model_error = "torch 不可用，自动回退启发式策略"
+            self.model_enabled = False
+            return
+
+        self._model, self._model_error = load_inference_model(
+            self._model_path,
+            map_location=self.config.ai_model_device,
+            expected_input_dim=23,
+            expected_action_dim=1,
+        )
+        if self._model is None:
+            self.model_enabled = False
+            if not self._model_error:
+                self._model_error = "模型加载失败，自动回退启发式策略"
+            return
+
+        try:
+            self._model_input_dim = int(self._model.net[0].in_features)
+        except Exception:
+            self._model_error = "模型结构不支持，自动回退启发式策略"
+            self._model = None
+            self.model_enabled = False
+
+    def _build_planned_command(self, ent: ArenaEntity) -> dict[str, int | bool]:
+        piece = ent.piece
+        state = self.ai_states[ent.id]
+        cmd = {"dx": 0, "rotate": False, "soft_drop": False, "hard_drop": False}
+
+        if piece is None:
+            return cmd
+
+        if state.rotation_steps_remaining > 0:
+            cmd["rotate"] = True
+            state.rotation_steps_remaining -= 1
+            return cmd
+
+        if piece.x < state.target_x:
+            cmd["dx"] = 1
+        elif piece.x > state.target_x:
+            cmd["dx"] = -1
+        else:
+            cmd["hard_drop"] = True
+            state.planned_piece_id = None
+
+        return cmd
+
+    def _model_board_cols(self) -> int:
+        return max(1, int(self._model_input_dim) - NEXT_STATE_AUX_FEATURE_COUNT)
+
+    def _crop_candidate_grid(self, grid, center_col: int, target_cols: int):
+        full_cols = len(grid[0]) if grid else 0
+        if full_cols <= 0:
+            return [], 0
+
+        if full_cols <= target_cols:
+            left_pad = max(0, (target_cols - full_cols) // 2)
+            right_pad = max(0, target_cols - full_cols - left_pad)
+            padded = []
+            for row in grid:
+                padded.append(([0] * left_pad) + row[:] + ([0] * right_pad))
+            return padded, -left_pad
+
+        start = max(0, min(full_cols - target_cols, int(center_col) - target_cols // 2))
+        cropped = [row[start : start + target_cols] for row in grid]
+        return cropped, start
+
+    def _piece_coords_in_window(self, piece, window_start: int, window_cols: int) -> list[float]:
+        if piece is None:
+            return [0.0, 0.0]
+
+        local_x = piece.x - window_start
+        local_x = max(0, min(window_cols - 1, local_x))
+        return [float(local_x), float(piece.y)]
+
+    def _other_piece_for(self, ent: ArenaEntity):
+        others = [other for other in self.entities if other.id != ent.id and other.piece is not None]
+        if not others:
+            return None
+        if ent.piece is None:
+            return others[0].piece
+
+        others.sort(key=lambda other: abs(other.piece.x - ent.piece.x))
+        return others[0].piece
+
+    def _build_model_features(self, ent: ArenaEntity, candidate) -> list[float]:
+        target_cols = self._model_board_cols()
+        piece = ent.piece
+        piece_width = len(piece.matrix[0]) if piece is not None and piece.matrix else 1
+        center_col = int(candidate["target_x"]) + max(0, piece_width // 2)
+        cropped_grid, window_start = self._crop_candidate_grid(candidate["result_grid"], center_col, target_cols)
+        return extract_next_state_features(
+            cropped_grid,
+            player_pos=self._piece_coords_in_window(piece, window_start, target_cols),
+            ai_pos=self._piece_coords_in_window(self._other_piece_for(ent), window_start, target_cols),
+            can_trap=False,
+            lines_cleared=float(candidate.get("lines_cleared", 0)),
+        )
+
+    def _score_candidate_with_model(self, ent: ArenaEntity, candidate) -> float | None:
+        if self._model is None or torch is None:
+            return None
+
+        features = self._build_model_features(ent, candidate)
+        tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+        try:
+            model_device = next(self._model.parameters()).device
+            tensor = tensor.to(model_device)
+        except Exception:
+            pass
+
+        try:
+            with torch.no_grad():
+                output = self._model(tensor)
+        except Exception as exc:
+            self._model_error = f"模型评分失败: {exc}"
+            self._model = None
+            self.model_enabled = False
+            return None
+
+        if hasattr(output, "detach"):
+            values = output.detach().flatten().tolist()
+        elif isinstance(output, (list, tuple)):
+            values = list(output)
+        else:
+            self._model_error = "模型输出格式不支持"
+            self._model = None
+            self.model_enabled = False
+            return None
+
+        if not values:
+            self._model_error = "模型输出为空"
+            self._model = None
+            self.model_enabled = False
+            return None
+
+        return float(values[0])
 
     def update(self, dt: int, _pressed_keys):
         if self.finished or self.paused:
@@ -159,10 +358,14 @@ class SharedArenaMatch:
             
         # Update gravity
         for ent in self.entities:
-            self.gravity_accumulators[ent.id] += dt
+            eff_dt = dt
+            if ent.is_player and getattr(self, "_player_down_held", False):
+                eff_dt *= 10  # Soft drop is much faster
+                
+            self.gravity_accumulators[ent.id] += eff_dt
             if self.gravity_accumulators[ent.id] >= self.gravity_interval_ms:
                 self.gravity_accumulators[ent.id] -= self.gravity_interval_ms
-                self.core.soft_drop_piece(ent)
+                self._soft_drop_or_lock(ent)
                 
         if self.core.check_game_over() or self.remaining_ms <= 0:
             self.finished = True
@@ -174,7 +377,7 @@ class SharedArenaMatch:
     def _run_cycle(self):
         cmds = {}
         for ent in self.entities:
-            cmds[ent.id] = {"dx": 0, "rotate": False, "hard_drop": False}
+            cmds[ent.id] = {"dx": 0, "rotate": False, "soft_drop": False, "hard_drop": False}
             
             if ent.is_player:
                 if self.move_timers[ent.id] == 0:
@@ -190,6 +393,9 @@ class SharedArenaMatch:
                     if ai_cmd["rotate"]:
                         self.core.rotate_piece(ent.piece)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id] // 2
+                    elif ai_cmd["soft_drop"]:
+                        self._soft_drop_or_lock(ent)
+                        self.move_timers[ent.id] = self.cooldown_ms[ent.id]
                     elif ai_cmd["hard_drop"]:
                         self.core.hard_drop_piece(ent)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id]
@@ -213,6 +419,18 @@ class SharedArenaMatch:
             # Find the chain of pushed entities
             chain = self._find_push_chain(ent, dx)
             if chain is not None:
+                # Check push rights for TRADITIONAL mode
+                if self.mode.key == "TRADITIONAL" and len(chain) > 1:
+                    # The initiator must have push rights
+                    if not self.push_rights[ent.id]:
+                        continue  # Cannot push!
+                    
+                    # If valid, initiator loses right, those pushed gain right
+                    self.push_rights[ent.id] = False
+                    for pushed_ent in chain:
+                        if pushed_ent.id != ent.id:
+                            self.push_rights[pushed_ent.id] = True
+
                 # Chain is valid, move everyone in the chain
                 for pushed_ent in chain:
                     pushed_ent.piece.x += dx
@@ -280,30 +498,16 @@ class SharedArenaMatch:
         state = self.ai_states[ent.id]
         
         if piece is None or self.core.state != "RUNNING":
-            return {"dx": 0, "rotate": False, "hard_drop": False}
+            return {"dx": 0, "rotate": False, "soft_drop": False, "hard_drop": False}
 
         if state.planned_piece_id != id(piece):
             self._plan_ai_piece(ent)
-
-        cmd = {"dx": 0, "rotate": False, "hard_drop": False}
-        if state.rotation_steps_remaining > 0:
-            cmd["rotate"] = True
-            state.rotation_steps_remaining -= 1
-            return cmd
-
-        if piece.x < state.target_x:
-            cmd["dx"] = 1
-        elif piece.x > state.target_x:
-            cmd["dx"] = -1
-        else:
-            cmd["hard_drop"] = True
-            state.planned_piece_id = None
-            
-        return cmd
+        return self._build_planned_command(ent)
 
     def _plan_ai_piece(self, ent: ArenaEntity):
         piece = ent.piece
-        if piece is None: return
+        if piece is None:
+            return
         
         state = self.ai_states[ent.id]
         candidates = generate_candidates(self.core.grid, piece, self.arena_config)
@@ -313,14 +517,23 @@ class SharedArenaMatch:
             state.planned_piece_id = id(piece)
             return
 
-        for candidate in candidates:
-            # Simple heuristic
-            candidate["total_score"] = candidate["surface_score"]
+        use_model_scores = self.model_enabled and self._model is not None
+        if use_model_scores:
+            for candidate in candidates:
+                model_score = self._score_candidate_with_model(ent, candidate)
+                if model_score is None:
+                    use_model_scores = False
+                    break
+                candidate["total_score"] = model_score
+
+        if not use_model_scores:
+            for candidate in candidates:
+                candidate["total_score"] = candidate["surface_score"]
 
         candidates.sort(key=lambda item: item["total_score"], reverse=True)
         selected = candidates[0]
 
-        if len(candidates) > 1 and random.random() < self.mode.ai_mistake_chance:
+        if (not use_model_scores) and len(candidates) > 1 and random.random() < self.mode.ai_mistake_chance:
             selected = random.choice(candidates[: min(3, len(candidates))])
 
         state.rotation_steps_remaining = selected["rotation_steps"]
@@ -416,6 +629,22 @@ class SharedArenaMatch:
         self.screen.blit(t_surf, (panel_rect.x + 20, panel_rect.y + 20))
         
         y_offset = 80
+        strategy = "模型落点评分" if self.model_enabled and self._model is not None else "启发式回退"
+        strategy_surf = self.small_font.render(f"AI策略: {strategy}", True, (220, 220, 220))
+        self.screen.blit(strategy_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
+        y_offset += 34
+
+        model_name = self._model_path.name
+        path_surf = self.small_font.render(f"模型: {model_name}", True, (210, 210, 210))
+        self.screen.blit(path_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
+        y_offset += 34
+
+        if self._model_error:
+            clipped = self._model_error[:24]
+            error_surf = self.small_font.render(f"状态: {clipped}", True, (255, 180, 160))
+            self.screen.blit(error_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
+            y_offset += 34
+
         for ent in self.entities:
             s_surf = self.small_font.render(f"{ent.id}: {ent.score} 分", True, (255, 255, 255))
             self.screen.blit(s_surf, (panel_rect.x + 20, panel_rect.y + y_offset))

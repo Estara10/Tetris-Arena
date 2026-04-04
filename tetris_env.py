@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
+from next_state_features import analyze_board, extract_next_state_features
 from ai_controller import AIController, board_profile
 from game_core import GameCore
 from piece_sequence import SharedShapeSequence
@@ -105,6 +106,14 @@ class TetrisEnv:
         self._prev_ai_holes = 0
         self._prev_player_max_height = 0
         self._prev_ai_max_height = 0
+        self._prev_player_aggregate_height = 0
+        self._prev_ai_aggregate_height = 0
+        self._prev_player_covered_holes = 0
+        self._prev_ai_covered_holes = 0
+        self._prev_player_transitions = 0
+        self._prev_ai_transitions = 0
+        self._prev_player_side_imbalance = 0
+        self._prev_ai_side_imbalance = 0
 
         self.reset(seed=seed)
 
@@ -164,6 +173,7 @@ class TetrisEnv:
 
         self.episode_step = 0
         self._sync_prev_metrics()
+        self._prev_player_locks = self.player_core.lock_count
 
         return self._get_state_vector()
 
@@ -458,54 +468,63 @@ class TetrisEnv:
             self.ai_warning_ttl = self.config.versus_warning_duration_ms
 
     def _compute_reward(self) -> float:
-        player_lines_gain = self.player_core.lines_cleared_total - self._prev_player_lines
-        ai_lines_gain = self.ai_core.lines_cleared_total - self._prev_ai_lines
+        player_lines_gain = self.player_core.lines_cleared_total - getattr(self, '_prev_player_lines', 0)
+        player_stats = analyze_board(self.player_core.grid)
+        player_holes = float(player_stats["holes"])
+        player_bumpiness = float(player_stats["bumpiness"])
+        player_aggregate_height = float(player_stats["aggregate_height"])
+        player_max_height = float(player_stats["max_height"])
+        player_covered_holes = float(player_stats["covered_holes"])
+        player_transitions = float(player_stats["row_transitions"]) + float(player_stats["col_transitions"])
+        heights = player_stats["heights"]
+        split = max(1, len(heights) // 2)
+        player_side_imbalance = float(abs(sum(heights[:split]) - sum(heights[split:])))
 
-        player_score_gain = self.player_core.score - self._prev_player_score
-        ai_score_gain = self.ai_core.score - self._prev_ai_score
+        reward = 0.25
 
-        player_garbage_gain = self.player_core.garbage_received_total - self._prev_player_garbage
-        ai_garbage_gain = self.ai_core.garbage_received_total - self._prev_ai_garbage
+        line_rewards = {1: 100.0, 2: 260.0, 3: 650.0, 4: 1500.0}
+        reward += line_rewards.get(player_lines_gain, 0.0)
 
-        player_heights, player_holes = board_profile(self.player_core.grid)
-        ai_heights, ai_holes = board_profile(self.ai_core.grid)
-        player_max_height = max(player_heights, default=0)
-        ai_max_height = max(ai_heights, default=0)
+        current_locks = getattr(self.player_core, 'lock_count', 0)
+        prev_locks = getattr(self, '_prev_player_locks', 0)
+        is_locked = current_locks > prev_locks
 
-        reward = 0.0
+        if is_locked:
+            delta_holes = player_holes - getattr(self, '_prev_player_holes', 0)
+            delta_bumpiness = player_bumpiness - getattr(self, '_prev_player_bumpiness', 0)
+            delta_aggregate_height = player_aggregate_height - getattr(self, '_prev_player_aggregate_height', 0)
+            delta_max_height = player_max_height - getattr(self, '_prev_player_max_height', 0)
+            delta_covered_holes = player_covered_holes - getattr(self, '_prev_player_covered_holes', 0)
+            delta_transitions = player_transitions - getattr(self, '_prev_player_transitions', 0)
+            delta_side_imbalance = player_side_imbalance - getattr(self, '_prev_player_side_imbalance', 0)
 
-        score_gap_gain = (player_score_gain - ai_score_gain)
-        reward += score_gap_gain * 1.8
+            reward -= max(0.0, delta_holes) * 5.0
+            reward -= max(0.0, delta_covered_holes) * 0.35
+            reward -= max(0.0, delta_bumpiness) * 0.45
+            reward -= max(0.0, delta_aggregate_height) * 0.35
+            reward -= max(0.0, delta_max_height) * 1.6
+            reward -= max(0.0, delta_transitions) * 0.12
+            reward -= max(0.0, delta_side_imbalance) * 0.35
 
-        reward += player_lines_gain * 1.2
-        reward -= ai_lines_gain * 0.9
+            reward += max(0.0, -delta_aggregate_height) * 0.55
+            reward += max(0.0, -delta_bumpiness) * 0.45
+            reward += max(0.0, -delta_holes) * 2.0
+            reward += max(0.0, -delta_side_imbalance) * 0.45
 
-        reward -= player_garbage_gain * 0.8
-        reward += ai_garbage_gain * 0.3
+            piece_y = getattr(self, '_recent_player_piece_y', 0)
+            reward += (piece_y / max(1.0, float(self.config.grid_rows - 1))) * 1.0
 
-        reward -= max(0, player_holes - self._prev_player_holes) * 0.10
-        reward += max(0, self._prev_ai_holes - ai_holes) * 0.04
-
-        reward -= max(0, player_max_height - self._prev_player_max_height) * 0.06
-        reward += max(0, self._prev_ai_max_height - ai_max_height) * 0.02
-
-        trap_used = any(event.get("trap_activated") for event in self._recent_events)
-        if trap_used:
-            reward += 0.06
-
-        reward -= 0.002
+        for event in self._recent_events:
+            if event.get("side") != "player":
+                continue
+            reward += float(event.get("attack_sent", 0)) * 12.0
+            reward += float(event.get("attack_canceled", 0)) * 8.0
+            reward -= float(event.get("garbage_settled", 0)) * 10.0
+            if event.get("trap_activated"):
+                reward += 2.0
 
         if self.player_core.state == "GAME_OVER":
             reward -= 120.0
-        if self.ai_core.state == "GAME_OVER" and self.player_core.state != "GAME_OVER":
-            reward += 120.0
-
-        if self.episode_step >= self.max_episode_steps:
-            final_gap = self.player_core.score - self.ai_core.score
-            if final_gap > 0:
-                reward += 30.0
-            elif final_gap < 0:
-                reward -= 30.0
 
         return reward
 
@@ -526,6 +545,95 @@ class TetrisEnv:
             "ai_state": self.ai_core.state,
         }
 
+    def get_next_states(self) -> dict:
+        """
+        获取当前方块穷举的所有合法落座状态。
+        返回: dict{(rotation_steps, target_x): state_vector}
+        """
+        states = {}
+        for cand in self.get_next_state_candidates():
+            states[cand["key"]] = cand["state"]
+        return states
+
+    def get_next_state_candidates(self) -> list[dict]:
+        from ai_controller import generate_candidates
+
+        piece = self.player_core.current_piece
+        if not piece:
+            return []
+
+        candidates = generate_candidates(self.player_core.grid, piece, self.config)
+        items = []
+        for cand in candidates:
+            rot = int(cand["rotation_steps"])
+            tx = int(cand["target_x"])
+            sim_grid = cand["result_grid"]
+            lines_cleared = int(cand.get("lines_cleared", 0))
+            items.append(
+                {
+                    "key": (rot, tx),
+                    "state": self._extract_board_features(sim_grid, lines_cleared),
+                    "surface_score": float(cand.get("surface_score", 0.0)),
+                    "lines_cleared": lines_cleared,
+                    "result_grid": sim_grid,
+                }
+            )
+        return items
+
+    def _extract_board_features(self, grid, lines_cleared=0) -> list[float]:
+        can_trap = (
+            self.player_trap_energy >= self.config.versus_trap_energy_cost
+            and self.player_trap_cooldown_ms <= 0
+        )
+        return extract_next_state_features(
+            grid,
+            player_piece=self.player_core.current_piece,
+            ai_piece=self.ai_core.current_piece,
+            can_trap=can_trap,
+            lines_cleared=float(lines_cleared),
+        )
+
+    def step_next_state(self, rotation_steps: int, target_x: int):
+        """一键抵达目标状态的跃迁动作"""
+        if self._is_done():
+            return self.step(ACTION_NOOP)
+            
+        self.episode_step += 1
+        self._recent_events = []
+        
+        self._tick_battle_states(self.step_dt_ms)
+        
+        piece = self.player_core.current_piece
+        if piece:
+            # 必须绕过碰撞检测强制旋转矩阵，否则如果在出生点旋转由于空间不足会被拒绝旋转
+            for _ in range(rotation_steps):
+                piece.matrix = piece.get_rotated_matrix()
+            piece.x = target_x
+            piece.y = piece.get_drop_position(self.player_core.grid)
+            self._recent_player_piece_y = piece.y
+            self.player_core.lock_shape()
+            
+        self.ai_controller.update(self.ai_core, self.step_dt_ms)
+        self.player_core.update(self.step_dt_ms)
+        self.ai_core.update(self.step_dt_ms)
+        
+        self._process_lock_events()
+        self._try_ai_activate_trap()
+        
+        reward = self._compute_reward()
+        done = self._is_done()
+        info = self._build_info(action=ACTION_HARD_DROP, reward=reward, done=done)
+        
+        self._sync_prev_metrics()
+        
+        # state vector 其实应该传真实的当前盘面，我们可以复用刚才的 _extract
+        return StepOutcome(
+            state=self._get_state_vector(),
+            reward=reward,
+            done=done,
+            info=info
+        )
+
     def _is_done(self) -> bool:
         if self.player_core.state == "GAME_OVER":
             return True
@@ -537,46 +645,59 @@ class TetrisEnv:
 
     def _get_state_vector(self) -> list[float]:
         state: list[float] = []
+        grid = self.player_core.grid
+        cols = self.config.grid_cols
+        rows = self.config.grid_rows
 
-        state.extend(self._board_binary(self.player_core.grid))
-        state.extend(self._board_binary(self.ai_core.grid))
+        heights = []
+        holes = 0
+        for x in range(cols):
+            col_height = 0
+            col_holes = 0
+            found_block = False
+            for y in range(rows):
+                if grid[y][x]:
+                    if not found_block:
+                        col_height = rows - y
+                        found_block = True
+                else:
+                    if found_block:
+                        col_holes += 1
+            heights.append(col_height)
+            holes += col_holes
+        
+        # 每一列的当前最高高度
+        state.extend([h for h in heights])
+        
+        # 全盘的空洞总数
+        state.append(holes)
 
-        state.extend(self._piece_onehot(self.player_core.current_piece))
-        state.extend(self._piece_onehot(self.player_core.next_piece))
-        state.extend(self._piece_onehot(self.ai_core.current_piece))
-        state.extend(self._piece_onehot(self.ai_core.next_piece))
+        # 相邻列的高度差绝对值之和（平整度）
+        bumpiness = sum(abs(heights[i] - heights[i-1]) for i in range(1, cols))
+        state.append(bumpiness)
 
-        player_heights, player_holes = board_profile(self.player_core.grid)
-        ai_heights, ai_holes = board_profile(self.ai_core.grid)
+        # AI 当前方块的坐标 (X, Y) (指 player_core)
+        p_piece = self.player_core.current_piece
+        if p_piece:
+            state.append(p_piece.x)
+            state.append(p_piece.y)
+        else:
+            state.extend([0, 0])
 
-        player_aggregate = sum(player_heights)
-        ai_aggregate = sum(ai_heights)
-        player_max_height = max(player_heights, default=0)
-        ai_max_height = max(ai_heights, default=0)
+        # 对手当前方块的坐标 (X, Y)
+        ai_piece = self.ai_core.current_piece
+        if ai_piece:
+            state.append(ai_piece.x)
+            state.append(ai_piece.y)
+        else:
+            state.extend([0, 0])
 
-        max_board = max(1, self.config.grid_rows * self.config.grid_cols)
-        state.append(player_aggregate / max_board)
-        state.append(ai_aggregate / max_board)
-        state.append(player_max_height / max(1, self.config.grid_rows))
-        state.append(ai_max_height / max(1, self.config.grid_rows))
-        state.append(player_holes / max_board)
-        state.append(ai_holes / max_board)
-
-        state.append(min(1.0, len(self.player_core.incoming_garbage) / 20.0))
-        state.append(min(1.0, len(self.ai_core.incoming_garbage) / 20.0))
-
-        state.append(min(1.0, self.player_trap_energy / 12.0))
-        state.append(min(1.0, self.ai_trap_energy / 12.0))
-        state.append(min(1.0, self.player_trap_cooldown_ms / max(1, self.config.versus_trap_cooldown_ms)))
-        state.append(min(1.0, self.ai_trap_cooldown_ms / max(1, self.config.versus_trap_cooldown_ms)))
-
-        state.append(self.player_combo / 10.0)
-        state.append(self.ai_combo / 10.0)
-        state.append(1.0 if self.player_b2b else 0.0)
-        state.append(1.0 if self.ai_b2b else 0.0)
+        # 当前是否拥有“撞人权”（1有，0无）
+        can_trap = 1.0 if (self.player_trap_energy >= self.config.versus_trap_energy_cost and self.player_trap_cooldown_ms <= 0) else 0.0
+        state.append(can_trap)
+        state.append(0.0) # padding lines_cleared for regular state queries
 
         return state
-
     def _board_binary(self, grid: list[list[int | str]]) -> list[float]:
         values: list[float] = []
         for row in grid:
@@ -600,9 +721,26 @@ class TetrisEnv:
         self._prev_player_garbage = self.player_core.garbage_received_total
         self._prev_ai_garbage = self.ai_core.garbage_received_total
 
-        player_heights, player_holes = board_profile(self.player_core.grid)
-        ai_heights, ai_holes = board_profile(self.ai_core.grid)
-        self._prev_player_holes = player_holes
-        self._prev_ai_holes = ai_holes
-        self._prev_player_max_height = max(player_heights, default=0)
-        self._prev_ai_max_height = max(ai_heights, default=0)
+        player_stats = analyze_board(self.player_core.grid)
+        ai_stats = analyze_board(self.ai_core.grid)
+        self._prev_player_holes = float(player_stats["holes"])
+        self._prev_ai_holes = float(ai_stats["holes"])
+        self._prev_player_max_height = float(player_stats["max_height"])
+        self._prev_ai_max_height = float(ai_stats["max_height"])
+        self._prev_player_bumpiness = float(player_stats["bumpiness"])
+        self._prev_ai_bumpiness = float(ai_stats["bumpiness"])
+        self._prev_player_aggregate_height = float(player_stats["aggregate_height"])
+        self._prev_ai_aggregate_height = float(ai_stats["aggregate_height"])
+        self._prev_player_covered_holes = float(player_stats["covered_holes"])
+        self._prev_ai_covered_holes = float(ai_stats["covered_holes"])
+        self._prev_player_transitions = float(player_stats["row_transitions"]) + float(player_stats["col_transitions"])
+        self._prev_ai_transitions = float(ai_stats["row_transitions"]) + float(ai_stats["col_transitions"])
+        player_heights = player_stats["heights"]
+        ai_heights = ai_stats["heights"]
+        player_split = max(1, len(player_heights) // 2)
+        ai_split = max(1, len(ai_heights) // 2)
+        self._prev_player_side_imbalance = float(abs(sum(player_heights[:player_split]) - sum(player_heights[player_split:])))
+        self._prev_ai_side_imbalance = float(abs(sum(ai_heights[:ai_split]) - sum(ai_heights[ai_split:])))
+        self._prev_player_locks = getattr(self.player_core, 'lock_count', self.player_core.lines_cleared_total * 0)  # fallback if not using lock_count
+        if hasattr(self, '_recent_player_piece_y'):
+            self._prev_player_piece_y = self._recent_player_piece_y

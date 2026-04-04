@@ -122,9 +122,9 @@ class TetrisApp:
                 self.current_ai_level = None
                 self.menu_state = MENU_CLASSIC_LEVEL
             elif key in (pygame.K_2, pygame.K_KP2):
-                self._start_match(GAME_MODES["CHALLENGE"])
+                self._start_match(GAME_MODES["TRADITIONAL"])
             elif key in (pygame.K_3, pygame.K_KP3):
-                self._start_match(GAME_MODES["ARENA"])
+                self._start_match(GAME_MODES["THREE_BODY"])
             return
 
         if self.menu_state == MENU_CLASSIC_LEVEL:
@@ -143,7 +143,7 @@ class TetrisApp:
         """传入选定的游戏模式和可能的 AI 等级，以此初始化对局环境 (VersusMatch)。"""
         self.current_mode = mode
         self.current_ai_level = ai_level if mode.key == "CLASSIC" else None
-        if mode.key == "ARENA":
+        if mode.key in ("TRADITIONAL", "THREE_BODY"):
             self.current_match = SharedArenaMatch(
                 self.screen,
                 self.current_mode,
@@ -162,7 +162,7 @@ class TetrisApp:
         if self.current_mode is None:
             return
 
-        if self.current_mode.key == "ARENA":
+        if self.current_mode.key in ("TRADITIONAL", "THREE_BODY"):
             self.current_match = SharedArenaMatch(
                 self.screen,
                 self.current_mode,

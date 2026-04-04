@@ -10,15 +10,15 @@ MODE_META = {
         "features": ("同步发牌", "比分决胜"),
         "footer": "适合先熟悉双屏对战和同步发牌节奏。",
     },
-    "CHALLENGE": {
-        "tag": "动态加压",
-        "features": ("目标消行", "难度自适应"),
-        "footer": "你的表现越好，AI 的压迫感就会越强。",
+    "TRADITIONAL": {
+        "tag": "双人推板",
+        "features": ("相向推挤", "消行得分"),
+        "footer": "只有消行能得分，不要怕撞人！",
     },
-    "ARENA": {
+    "THREE_BODY": {
         "tag": "同盘对抗",
-        "features": ("同盘碰撞", "限时积分"),
-        "footer": "玩家与 AI 在同一棋盘同步下落，计时结束比分高者胜。",
+        "features": ("三体同盘", "大乱斗"),
+        "footer": "在宽敞的 33x25 棋盘中成为最终的活存者吧。",
     },
 }
 
@@ -400,16 +400,16 @@ def draw_mode_select_menu(screen, config: GameConfig, fonts):
         ("双屏同步", "中文界面", "单步移动"),
     )
 
-    mode_order = ("CLASSIC", "CHALLENGE", "ARENA")
+    mode_order = ("CLASSIC", "TRADITIONAL", "THREE_BODY")
     key_hints = {
         "CLASSIC": "1",
-        "CHALLENGE": "2",
-        "ARENA": "3",
+        "TRADITIONAL": "2",
+        "THREE_BODY": "3",
     }
     accent_colors = {
         "CLASSIC": (97, 190, 246),
-        "CHALLENGE": (248, 150, 109),
-        "ARENA": (162, 203, 114),
+        "TRADITIONAL": (248, 150, 109),
+        "THREE_BODY": (162, 203, 114),
     }
 
     card_gap = 24

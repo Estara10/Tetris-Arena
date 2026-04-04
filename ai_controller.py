@@ -1,6 +1,7 @@
 import random
-from pathlib import Path
 
+from dqn_model import load_inference_model
+from next_state_features import extract_next_state_features
 from settings import CONFIG, GameConfig
 from tetromino import Tetromino
 
@@ -173,6 +174,13 @@ def evaluate_grid(grid, lines_cleared):
         abs(left_height - right_height)
         for left_height, right_height in zip(heights, heights[1:])
     )
+    split = max(1, len(heights) // 2)
+    left_height_sum = sum(heights[:split])
+    right_height_sum = sum(heights[split:])
+    side_imbalance = abs(left_height_sum - right_height_sum)
+    left_peak = max(heights[:split], default=0)
+    right_peak = max(heights[split:], default=0)
+    peak_imbalance = abs(left_peak - right_peak)
 
     return (
         lines_cleared * 1500
@@ -180,6 +188,8 @@ def evaluate_grid(grid, lines_cleared):
         - max_height * 18.0
         - holes * 56.0
         - bumpiness * 11.0
+        - side_imbalance * 4.0
+        - peak_imbalance * 9.0
     )
 
 
@@ -332,33 +342,16 @@ class AIController:
             self.mode = "heuristic"
             return
 
-        model_file = Path(self.model_path)
-        if not model_file.exists():
-            self._model_error = f"模型文件不存在: {self.model_path}"
+        self._model, self._model_error = load_inference_model(
+            self.model_path,
+            map_location=self.model_device,
+            expected_input_dim=20,
+            expected_action_dim=5,
+        )
+        if self._model is None:
             self.mode = "heuristic"
-            return
-
-        try:
-            device = torch.device(self.model_device)
-            self._model = torch.jit.load(str(model_file), map_location=device)
-            self._model.eval()
-            self._model_error = ""
-            return
-        except Exception:
-            pass
-
-        try:
-            loaded = torch.load(str(model_file), map_location=self.model_device)
-            if hasattr(loaded, "eval"):
-                loaded.eval()
-                self._model = loaded
-                self._model_error = ""
-                return
-            self._model_error = "模型格式不支持，自动回退启发式模式"
-            self.mode = "heuristic"
-        except Exception as exc:
-            self._model_error = f"模型加载失败: {exc}"
-            self.mode = "heuristic"
+            if not self._model_error:
+                self._model_error = "模型格式不支持，自动回退启发式模式"
 
     def _build_model_state(self, game_core):
         heights, holes = board_profile(game_core.grid)
@@ -482,6 +475,29 @@ class AIController:
             self._planned_piece_id = id(piece)
             self.last_plan_score = -9999.0
             return
+
+        if self._model is not None and torch is not None:
+            can_trap = False
+            features = [
+                extract_next_state_features(
+                    candidate["result_grid"],
+                    player_piece=game_core.current_piece,
+                    ai_piece=game_core.next_piece,
+                    can_trap=can_trap,
+                    lines_cleared=float(candidate.get("lines_cleared", 0)),
+                )
+                for candidate in candidates
+            ]
+            tensor = torch.as_tensor(features, dtype=torch.float32)
+            try:
+                model_device = next(self._model.parameters()).device
+                tensor = tensor.to(model_device)
+                with torch.no_grad():
+                    scores = self._model(tensor).squeeze(-1).detach().cpu().tolist()
+                for candidate, score in zip(candidates, scores):
+                    candidate["surface_score"] = float(score)
+            except Exception:
+                pass
 
         for candidate in candidates:
             future_score = best_future_score(
