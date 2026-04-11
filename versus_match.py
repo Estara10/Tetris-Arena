@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 
 import pygame
 
@@ -64,12 +65,16 @@ class VersusMatch:
             initial_action_interval = self.ai_level.action_interval_ms
             initial_mistake_chance = self.ai_level.mistake_chance
 
+        configured_model_path = Path(self.config.ai_model_path)
+        if not configured_model_path.is_absolute():
+            configured_model_path = Path(__file__).resolve().parent / configured_model_path
+
         self.ai_controller = AIController(
             config=self.config,
             action_interval_ms=initial_action_interval,
             mistake_chance=initial_mistake_chance,
             mode="model",
-            model_path=__import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "models/next_state/best.pt"),
+            model_path=str(configured_model_path),
         )
 
         pygame.font.init()
@@ -186,12 +191,17 @@ class VersusMatch:
     def _update_ai_profile(self):
         action_interval_ms = self.mode.ai_action_interval_ms
         mistake_chance = self.mode.ai_mistake_chance
+        player_fall_speed = self.config.fall_speed_ms
         ai_fall_speed = self.config.fall_speed_ms
 
         if self.mode.key == "CLASSIC" and self.ai_level is not None:
             action_interval_ms = self.ai_level.action_interval_ms
             mistake_chance = self.ai_level.mistake_chance
-            ai_fall_speed = self.ai_level.fall_speed_ms
+            classic_fall_speed = max(80, int(self.config.classic_fall_speed_ms))
+            player_fall_speed = classic_fall_speed
+            ai_fall_speed = classic_fall_speed
+            if self.ai_controller.mode == "model":
+                action_interval_ms = int(self.config.ai_model_action_interval_ms)
         elif self.mode.key == "CHALLENGE":
             target_lines = self.mode.objective_lines or 1
             progress = min(1.0, self.player_core.lines_cleared_total / target_lines)
@@ -210,7 +220,7 @@ class VersusMatch:
                 self.config.fall_speed_ms - progress * 140 - pressure * 100
             )
 
-        self.player_core.set_fall_speed(self.config.fall_speed_ms)
+        self.player_core.set_fall_speed(player_fall_speed)
         self.ai_core.set_fall_speed(ai_fall_speed)
         self.ai_controller.set_profile(action_interval_ms, mistake_chance)
 

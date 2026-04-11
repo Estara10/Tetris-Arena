@@ -4,11 +4,39 @@ import torch.nn as nn
 from deep_q_network import DeepQNetwork
 
 
+def _normalize_state_dict_payload(payload):
+    """Normalize torch.load payload into a plain model state_dict.
+
+    Supports:
+    - raw state_dict
+    - checkpoint dicts containing model_state_dict/state_dict/policy_state_dict
+    - torch.compile saved keys with `_orig_mod.` prefix
+    """
+    if isinstance(payload, dict):
+        for candidate_key in ("model_state_dict", "state_dict", "policy_state_dict"):
+            candidate = payload.get(candidate_key)
+            if isinstance(candidate, dict):
+                payload = candidate
+                break
+
+    if not isinstance(payload, dict):
+        raise ValueError("Unsupported model payload format")
+
+    normalized = {}
+    for key, value in payload.items():
+        key_text = str(key)
+        if key_text.startswith("_orig_mod."):
+            key_text = key_text.replace("_orig_mod.", "", 1)
+        normalized[key_text] = value
+    return normalized
+
+
 def _load_state_dict(model_path, map_location="cpu"):
     try:
-        return torch.load(model_path, map_location=map_location, weights_only=True)
+        payload = torch.load(model_path, map_location=map_location, weights_only=True)
     except TypeError:
-        return torch.load(model_path, map_location=map_location)
+        payload = torch.load(model_path, map_location=map_location)
+    return _normalize_state_dict_payload(payload)
 
 
 def load_inference_model(model_path, map_location="cpu", expected_input_dim=23, expected_action_dim=1):

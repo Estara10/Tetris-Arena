@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-NEXT_STATE_AUX_FEATURE_COUNT = 15
+NEXT_STATE_AUX_FEATURE_COUNT = 18
 
 
 def next_state_feature_size(grid_cols: int) -> int:
@@ -17,6 +17,11 @@ def analyze_board(grid, danger_rows: int | None = None) -> dict[str, float | lis
     holes = 0
     covered_holes = 0
     aggregate_height = 0
+    
+    # 新增：深层空洞统计（底部1/3区域的空洞更严重）
+    deep_holes = 0  # 底部区域的空洞数
+    deep_hole_depth_sum = 0  # 空洞深度加权和（越深惩罚越重）
+    bottom_third = rows * 2 // 3  # 底部1/3的起始行
 
     for x in range(cols):
         col_height = 0
@@ -30,6 +35,12 @@ def analyze_board(grid, danger_rows: int | None = None) -> dict[str, float | lis
             elif blocks_seen > 0:
                 holes += 1
                 covered_holes += blocks_seen
+                # 统计深层空洞
+                if y >= bottom_third:
+                    deep_holes += 1
+                    # 越靠近底部，惩罚越重（深度权重）
+                    depth_weight = (y - bottom_third + 1) / max(1, rows - bottom_third)
+                    deep_hole_depth_sum += depth_weight
         heights.append(col_height)
         aggregate_height += col_height
 
@@ -91,6 +102,9 @@ def analyze_board(grid, danger_rows: int | None = None) -> dict[str, float | lis
         "wells": float(wells),
         "danger_cells": float(danger_cells),
         "danger_rows": float(danger_band),
+        "deep_holes": float(deep_holes),
+        "deep_hole_depth_sum": float(deep_hole_depth_sum),
+        "bottom_third_row": float(bottom_third),
     }
 
 
@@ -133,6 +147,19 @@ def extract_next_state_features(
         float(stats["danger_cells"])
         / float(max(1, int(stats["danger_rows"]) * cols))
     )
+    # 新增：深层空洞特征（底部空洞对消行影响更大）
+    bottom_cells = max(1, (rows - int(stats["bottom_third_row"])) * cols)
+    state.append(float(stats["deep_holes"]) / float(bottom_cells))
+    state.append(float(stats["deep_hole_depth_sum"]) / float(max(1, cols)))
+    # 新增：底部填充率（底部越满越好，说明可以消行）
+    bottom_filled = 0
+    bottom_row_start = int(stats["bottom_third_row"])
+    for y in range(bottom_row_start, rows):
+        for x in range(cols):
+            if grid[y][x] != 0:
+                bottom_filled += 1
+    state.append(float(bottom_filled) / float(bottom_cells))
+    
     state.append(player_x / float(max(1, cols - 1)))
     state.append(player_y / float(max(1, rows - 1)))
     state.append(ai_x / float(max(1, cols - 1)))

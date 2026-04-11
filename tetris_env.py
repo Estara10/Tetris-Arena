@@ -470,20 +470,50 @@ class TetrisEnv:
     def _compute_reward(self) -> float:
         player_lines_gain = self.player_core.lines_cleared_total - getattr(self, '_prev_player_lines', 0)
         player_stats = analyze_board(self.player_core.grid)
+        rows = max(1.0, float(player_stats["rows"]))
+        cols = max(1.0, float(player_stats["cols"]))
         player_holes = float(player_stats["holes"])
         player_bumpiness = float(player_stats["bumpiness"])
         player_aggregate_height = float(player_stats["aggregate_height"])
         player_max_height = float(player_stats["max_height"])
         player_covered_holes = float(player_stats["covered_holes"])
         player_transitions = float(player_stats["row_transitions"]) + float(player_stats["col_transitions"])
+        player_danger_cells = float(player_stats["danger_cells"])
+        # 新增：深层空洞统计
+        player_deep_holes = float(player_stats.get("deep_holes", 0.0))
+        player_deep_hole_depth = float(player_stats.get("deep_hole_depth_sum", 0.0))
         heights = player_stats["heights"]
         split = max(1, len(heights) // 2)
         player_side_imbalance = float(abs(sum(heights[:split]) - sum(heights[split:])))
+        near_top_excess = sum(max(0.0, float(height) - (rows - 6.0)) for height in heights)
+        high_columns = float(sum(1 for height in heights if float(height) >= rows - 4.0))
+        avg_height = player_aggregate_height / cols
+        danger_density = player_danger_cells / max(1.0, float(player_stats["danger_rows"]) * cols)
 
         reward = 0.25
 
-        line_rewards = {1: 100.0, 2: 260.0, 3: 650.0, 4: 1500.0}
+        line_rewards = {1: 30.0, 2: 130.0, 3: 420.0, 4: 1300.0}
         reward += line_rewards.get(player_lines_gain, 0.0)
+        reward -= avg_height * 0.22
+        reward -= max(0.0, player_max_height - rows * 0.55) * 1.1
+        reward -= player_danger_cells * 3.5
+        reward -= near_top_excess * 1.8
+        reward -= high_columns * 2.5
+        reward -= danger_density * 6.0
+        reward -= player_side_imbalance * 0.08
+        # 新增：深层空洞惩罚（底部空洞更严重，因为难以消除）
+        reward -= player_deep_holes * 8.0
+        reward -= player_deep_hole_depth * 12.0
+
+        if player_max_height <= rows * 0.42 and player_danger_cells <= 0.0:
+            reward += 2.0
+        
+        # 新增：底部干净奖励（没有深层空洞时给予额外奖励）
+        if player_deep_holes == 0.0 and player_holes <= 2.0:
+            reward += 3.0
+
+        if player_lines_gain == 1 and (player_danger_cells > 0.0 or player_max_height >= rows - 5.0):
+            reward -= 18.0 + player_danger_cells * 1.5 + near_top_excess * 1.2
 
         current_locks = getattr(self.player_core, 'lock_count', 0)
         prev_locks = getattr(self, '_prev_player_locks', 0)
@@ -497,19 +527,34 @@ class TetrisEnv:
             delta_covered_holes = player_covered_holes - getattr(self, '_prev_player_covered_holes', 0)
             delta_transitions = player_transitions - getattr(self, '_prev_player_transitions', 0)
             delta_side_imbalance = player_side_imbalance - getattr(self, '_prev_player_side_imbalance', 0)
+            delta_danger_cells = player_danger_cells - getattr(self, '_prev_player_danger_cells', 0.0)
+            delta_high_columns = high_columns - getattr(self, '_prev_player_high_columns', 0.0)
+            # 新增：深层空洞变化
+            delta_deep_holes = player_deep_holes - getattr(self, '_prev_player_deep_holes', 0.0)
+            delta_deep_hole_depth = player_deep_hole_depth - getattr(self, '_prev_player_deep_hole_depth', 0.0)
 
             reward -= max(0.0, delta_holes) * 5.0
-            reward -= max(0.0, delta_covered_holes) * 0.35
-            reward -= max(0.0, delta_bumpiness) * 0.45
-            reward -= max(0.0, delta_aggregate_height) * 0.35
-            reward -= max(0.0, delta_max_height) * 1.6
+            reward -= max(0.0, delta_covered_holes) * 0.30
+            reward -= max(0.0, delta_bumpiness) * 0.40
+            reward -= max(0.0, delta_aggregate_height) * 0.30
+            reward -= max(0.0, delta_max_height) * 1.5
             reward -= max(0.0, delta_transitions) * 0.12
-            reward -= max(0.0, delta_side_imbalance) * 0.35
+            reward -= max(0.0, delta_side_imbalance) * 0.30
+            reward -= max(0.0, delta_danger_cells) * 3.5
+            reward -= max(0.0, delta_high_columns) * 3.0
+            # 新增：深层空洞增量惩罚（新增深层空洞惩罚更重）
+            reward -= max(0.0, delta_deep_holes) * 10.0
+            reward -= max(0.0, delta_deep_hole_depth) * 15.0
 
             reward += max(0.0, -delta_aggregate_height) * 0.55
             reward += max(0.0, -delta_bumpiness) * 0.45
             reward += max(0.0, -delta_holes) * 2.0
-            reward += max(0.0, -delta_side_imbalance) * 0.45
+            reward += max(0.0, -delta_side_imbalance) * 0.42
+            reward += max(0.0, -delta_danger_cells) * 1.8
+            reward += max(0.0, -delta_high_columns) * 2.0
+            # 新增：消除深层空洞奖励
+            reward += max(0.0, -delta_deep_holes) * 5.0
+            reward += max(0.0, -delta_deep_hole_depth) * 8.0
 
             piece_y = getattr(self, '_recent_player_piece_y', 0)
             reward += (piece_y / max(1.0, float(self.config.grid_rows - 1))) * 1.0
@@ -524,7 +569,9 @@ class TetrisEnv:
                 reward += 2.0
 
         if self.player_core.state == "GAME_OVER":
-            reward -= 120.0
+            reward = min(reward - 500.0, -500.0)
+        elif self.ai_core.state == "GAME_OVER":
+            reward += 350.0
 
         return reward
 
@@ -735,12 +782,21 @@ class TetrisEnv:
         self._prev_ai_covered_holes = float(ai_stats["covered_holes"])
         self._prev_player_transitions = float(player_stats["row_transitions"]) + float(player_stats["col_transitions"])
         self._prev_ai_transitions = float(ai_stats["row_transitions"]) + float(ai_stats["col_transitions"])
+        self._prev_player_danger_cells = float(player_stats["danger_cells"])
+        self._prev_ai_danger_cells = float(ai_stats["danger_cells"])
+        # 新增：深层空洞追踪
+        self._prev_player_deep_holes = float(player_stats.get("deep_holes", 0.0))
+        self._prev_ai_deep_holes = float(ai_stats.get("deep_holes", 0.0))
+        self._prev_player_deep_hole_depth = float(player_stats.get("deep_hole_depth_sum", 0.0))
+        self._prev_ai_deep_hole_depth = float(ai_stats.get("deep_hole_depth_sum", 0.0))
         player_heights = player_stats["heights"]
         ai_heights = ai_stats["heights"]
         player_split = max(1, len(player_heights) // 2)
         ai_split = max(1, len(ai_heights) // 2)
         self._prev_player_side_imbalance = float(abs(sum(player_heights[:player_split]) - sum(player_heights[player_split:])))
         self._prev_ai_side_imbalance = float(abs(sum(ai_heights[:ai_split]) - sum(ai_heights[ai_split:])))
+        self._prev_player_high_columns = float(sum(1 for height in player_heights if float(height) >= float(player_stats["rows"]) - 4.0))
+        self._prev_ai_high_columns = float(sum(1 for height in ai_heights if float(height) >= float(ai_stats["rows"]) - 4.0))
         self._prev_player_locks = getattr(self.player_core, 'lock_count', self.player_core.lines_cleared_total * 0)  # fallback if not using lock_count
         if hasattr(self, '_recent_player_piece_y'):
             self._prev_player_piece_y = self._recent_player_piece_y

@@ -63,10 +63,11 @@ class GameConfig:
 
     # AI 运行参数
     ai_controller_mode: str = "heuristic"
-    ai_model_path: str = "models/tetris_dqn.pt"
+    ai_model_path: str = "models/next_state_v3/best.pt"
     ai_model_device: str = "cpu"
     ai_model_action_interval_ms: int = 140
     ai_model_reaction_delay_ms: int = 120
+    classic_fall_speed_ms: int = 140
 
     # 强化学习训练参数
     rl_enabled: bool = False
@@ -259,8 +260,11 @@ def load_config() -> GameConfig:
         fps=_env_int("TETRIS_FPS", 60),
         bg_speed=_env_int("TETRIS_BG_SPEED", 1),
         ai_controller_mode=_env_str("TETRIS_AI_MODE", "heuristic"),
-        ai_model_path=_env_str("TETRIS_AI_MODEL_PATH", "models/tetris_dqn.pt"),
+        ai_model_path=_env_str("TETRIS_AI_MODEL_PATH", "models/next_state_v3/best.pt"),
         ai_model_device=_env_str("TETRIS_AI_DEVICE", "cpu"),
+        ai_model_action_interval_ms=_env_int("TETRIS_AI_MODEL_ACTION_MS", 140),
+        ai_model_reaction_delay_ms=_env_int("TETRIS_AI_MODEL_REACTION_MS", 120),
+        classic_fall_speed_ms=_env_int("TETRIS_CLASSIC_FALL_MS", 140),
         rl_enabled=_env_bool("TETRIS_RL_ENABLED", False),
         rl_train_episodes=_env_int("TETRIS_RL_EPISODES", 300),
         rl_warmup_steps=_env_int("TETRIS_RL_WARMUP", 1200),

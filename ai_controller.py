@@ -1,7 +1,7 @@
 import random
 
 from dqn_model import load_inference_model
-from next_state_features import extract_next_state_features
+from next_state_features import analyze_board, extract_next_state_features
 from settings import CONFIG, GameConfig
 from tetromino import Tetromino
 
@@ -159,6 +159,7 @@ def evaluate_grid(grid, lines_cleared):
     用启发式算法评估当前网格局面得分。
     - 奖励消行越多越好
     - 惩罚总堆高、最高列高度、产生的空洞和表面起伏
+    - 特别惩罚底层空洞（难以消除）
     
     参数:
     grid (list): 待评估网格
@@ -167,9 +168,17 @@ def evaluate_grid(grid, lines_cleared):
     返回:
     float: 最终评估分数
     """
-    heights, holes = board_profile(grid)
-    aggregate_height = sum(heights)
-    max_height = max(heights, default=0)
+    stats = analyze_board(grid)
+    heights = stats["heights"]
+    holes = float(stats["holes"])
+    aggregate_height = float(stats["aggregate_height"])
+    max_height = float(stats["max_height"])
+    covered_holes = float(stats["covered_holes"])
+    danger_cells = float(stats["danger_cells"])
+    # 新增：深层空洞
+    deep_holes = float(stats.get("deep_holes", 0.0))
+    deep_hole_depth = float(stats.get("deep_hole_depth_sum", 0.0))
+    rows = max(1.0, float(stats["rows"]))
     bumpiness = sum(
         abs(left_height - right_height)
         for left_height, right_height in zip(heights, heights[1:])
@@ -181,15 +190,43 @@ def evaluate_grid(grid, lines_cleared):
     left_peak = max(heights[:split], default=0)
     right_peak = max(heights[split:], default=0)
     peak_imbalance = abs(left_peak - right_peak)
+    near_top_excess = sum(max(0.0, float(height) - (rows - 6.0)) for height in heights)
+    high_columns = sum(1 for height in heights if float(height) >= rows - 4.0)
+    single_line_bias = 220.0 if lines_cleared == 1 else 0.0
 
     return (
-        lines_cleared * 1500
-        - aggregate_height * 5.0
-        - max_height * 18.0
-        - holes * 56.0
-        - bumpiness * 11.0
-        - side_imbalance * 4.0
-        - peak_imbalance * 9.0
+        lines_cleared * 1150.0
+        - single_line_bias
+        - aggregate_height * 6.5
+        - max_height * 24.0
+        - holes * 64.0
+        - covered_holes * 1.8
+        - bumpiness * 12.5
+        - side_imbalance * 4.5
+        - peak_imbalance * 10.0
+        - danger_cells * 95.0
+        - near_top_excess * 42.0
+        - high_columns * 28.0
+        # 新增：深层空洞惩罚（底部空洞更难消除，惩罚更重）
+        - deep_holes * 120.0
+        - deep_hole_depth * 80.0
+    )
+
+
+def risk_penalty(grid):
+    stats = analyze_board(grid)
+    heights = stats["heights"]
+    rows = max(1.0, float(stats["rows"]))
+    danger_cells = float(stats["danger_cells"])
+    near_top_excess = sum(max(0.0, float(height) - (rows - 6.0)) for height in heights)
+    high_columns = sum(1 for height in heights if float(height) >= rows - 4.0)
+    max_height = float(stats["max_height"])
+
+    return (
+        danger_cells * 24.0
+        + near_top_excess * 12.0
+        + high_columns * 8.0
+        + max(0.0, max_height - (rows - 5.0)) * 10.0
     )
 
 
@@ -209,11 +246,12 @@ def generate_candidates(grid, piece, config):
 
     for rotation_steps, matrix in unique_rotations(piece.matrix):
         min_x, max_x = valid_x_range(matrix, config.grid_cols)
+        trial_piece = clone_piece(piece)
+        trial_piece.matrix = [row[:] for row in matrix]
+        spawn_y = piece.y
         for target_x in range(min_x, max_x + 1):
-            trial_piece = clone_piece(piece)
-            trial_piece.matrix = [row[:] for row in matrix]
             trial_piece.x = target_x
-            trial_piece.y = piece.y
+            trial_piece.y = spawn_y
 
             if trial_piece.check_collision(grid=grid):
                 continue
@@ -291,6 +329,9 @@ class AIController:
         self._rotation_steps_remaining = 0
         self._target_x = 0
         self.last_plan_score = 0.0
+        self._planned_garbage_received_total = 0
+        self._planned_incoming_garbage_len = 0
+        self._closed_loop_enabled = self.mode == "model"
 
         self._model = None
         self._model_error = ""
@@ -311,12 +352,33 @@ class AIController:
 
     def reset(self):
         self._action_timer = 0
-        self._planned_piece_id = None
-        self._rotation_steps_remaining = 0
-        self._target_x = 0
+        self._clear_plan()
         self.last_plan_score = 0.0
         self._pending_model_action = None
         self._pending_model_delay_ms = 0
+
+    def _clear_plan(self):
+        self._planned_piece_id = None
+        self._rotation_steps_remaining = 0
+        self._target_x = 0
+        self._planned_garbage_received_total = 0
+        self._planned_incoming_garbage_len = 0
+
+    def _mark_planned_snapshot(self, game_core):
+        self._planned_garbage_received_total = int(getattr(game_core, "garbage_received_total", 0))
+        self._planned_incoming_garbage_len = int(len(getattr(game_core, "incoming_garbage", [])))
+
+    def _should_recalculate_plan(self, game_core) -> bool:
+        if not self._closed_loop_enabled:
+            return False
+
+        current_received = int(getattr(game_core, "garbage_received_total", 0))
+        current_incoming = int(len(getattr(game_core, "incoming_garbage", [])))
+        if current_received > self._planned_garbage_received_total:
+            return True
+        if current_incoming != self._planned_incoming_garbage_len:
+            return True
+        return False
 
     def update(self, game_core, dt):
         if game_core.state != "RUNNING" or game_core.current_piece is None:
@@ -465,16 +527,11 @@ class AIController:
         self._pending_model_delay_ms = 0
         self._execute_model_action(game_core, action)
 
-    def _plan_for_piece(self, game_core):
+    def _select_best_candidate(self, game_core, allow_mistake: bool = True):
         piece = game_core.current_piece
         candidates = generate_candidates(game_core.grid, piece, self.config)
-
         if not candidates:
-            self._rotation_steps_remaining = 0
-            self._target_x = piece.x
-            self._planned_piece_id = id(piece)
-            self.last_plan_score = -9999.0
-            return
+            return None
 
         if self._model is not None and torch is not None:
             can_trap = False
@@ -505,26 +562,48 @@ class AIController:
                 game_core.next_piece,
                 self.config,
             )
+            stack_risk = risk_penalty(candidate["result_grid"])
             target_bias = abs(candidate["target_x"] - self.config.grid_cols // 2) * 0.3
             candidate["total_score"] = (
                 candidate["surface_score"]
                 + future_score * self.lookahead_weight
                 - target_bias
+                - stack_risk
             )
 
         candidates.sort(key=lambda item: item["total_score"], reverse=True)
         selected = candidates[0]
 
-        if len(candidates) > 1 and random.random() < self.mistake_chance:
+        if allow_mistake and len(candidates) > 1 and random.random() < self.mistake_chance:
             selected = random.choice(candidates[: min(3, len(candidates))])
 
-        self._rotation_steps_remaining = selected["rotation_steps"]
-        self._target_x = selected["target_x"]
+        return selected
+
+    def _plan_for_piece(self, game_core):
+        piece = game_core.current_piece
+        selected = self._select_best_candidate(game_core, allow_mistake=True)
+        if selected is None:
+            self._rotation_steps_remaining = 0
+            self._target_x = piece.x
+            self._planned_piece_id = id(piece)
+            self.last_plan_score = -9999.0
+            self._mark_planned_snapshot(game_core)
+            return
+
+        self._rotation_steps_remaining = int(selected["rotation_steps"])
+        self._target_x = int(selected["target_x"])
         self._planned_piece_id = id(piece)
-        self.last_plan_score = selected["total_score"]
+        self.last_plan_score = float(selected["total_score"])
+        self._mark_planned_snapshot(game_core)
 
     def _execute_next_action(self, game_core):
         piece = game_core.current_piece
+        if piece is None:
+            self._clear_plan()
+            return
+
+        if self._planned_piece_id != id(piece) or self._should_recalculate_plan(game_core):
+            self._plan_for_piece(game_core)
 
         if self._rotation_steps_remaining > 0:
             if piece.rotate(game_core.grid):
@@ -547,6 +626,21 @@ class AIController:
                 self._plan_for_piece(game_core)
             return
 
+        if self._closed_loop_enabled:
+            # Final check before hard-drop: re-evaluate best move on the real current board.
+            # If target changed, update plan and defer hard drop to next tick.
+            reselected = self._select_best_candidate(game_core, allow_mistake=False)
+            if reselected is not None:
+                new_target_x = int(reselected["target_x"])
+                new_rot_steps = int(reselected["rotation_steps"])
+                if new_target_x != int(piece.x) or new_rot_steps != 0:
+                    self._target_x = new_target_x
+                    self._rotation_steps_remaining = new_rot_steps
+                    self._planned_piece_id = id(piece)
+                    self.last_plan_score = float(reselected["total_score"])
+                    self._mark_planned_snapshot(game_core)
+                    return
+
         piece.y = piece.get_drop_position(game_core.grid)
         game_core.lock_shape()
-        self._planned_piece_id = None
+        self._clear_plan()

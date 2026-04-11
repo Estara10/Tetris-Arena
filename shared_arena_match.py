@@ -1,5 +1,6 @@
 import time
 from dataclasses import replace
+from pathlib import Path
 import random
 
 import pygame
@@ -92,8 +93,14 @@ class SharedArenaMatch:
         self._model = None
         self._model_input_dim = 0
         self._model_error = ""
-        import os
-        self._model_path = __import__("pathlib").Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/next_state/best.pt"))
+        # In shared-arena mode, model is out-of-distribution relative to next-state training.
+        # Keep heuristic as a safety prior and let model only re-rank a shortlist.
+        self._model_rerank_topk = 8
+        self._model_rerank_scale = 35.0
+        configured_model_path = Path(self.config.ai_model_path)
+        if not configured_model_path.is_absolute():
+            configured_model_path = Path(__file__).resolve().parent / configured_model_path
+        self._model_path = configured_model_path
 
         # Limits and Timers
         self.cooldown_ms = {
@@ -517,18 +524,32 @@ class SharedArenaMatch:
             state.planned_piece_id = id(piece)
             return
 
+        for candidate in candidates:
+            candidate["total_score"] = float(candidate["surface_score"])
+
         use_model_scores = self.model_enabled and self._model is not None
         if use_model_scores:
-            for candidate in candidates:
+            candidates.sort(key=lambda item: item["surface_score"], reverse=True)
+            top_k = max(1, min(len(candidates), int(self._model_rerank_topk)))
+            shortlist = candidates[:top_k]
+
+            scored_pairs = []
+            for candidate in shortlist:
                 model_score = self._score_candidate_with_model(ent, candidate)
                 if model_score is None:
                     use_model_scores = False
                     break
-                candidate["total_score"] = model_score
+                scored_pairs.append((candidate, float(model_score)))
 
-        if not use_model_scores:
-            for candidate in candidates:
-                candidate["total_score"] = candidate["surface_score"]
+            if use_model_scores and scored_pairs:
+                values = [item[1] for item in scored_pairs]
+                mean_value = sum(values) / max(1, len(values))
+                var_value = sum((value - mean_value) ** 2 for value in values) / max(1, len(values))
+                std_value = (var_value + 1e-6) ** 0.5
+
+                for candidate, model_score in scored_pairs:
+                    normalized_model_score = (model_score - mean_value) / std_value
+                    candidate["total_score"] = float(candidate["surface_score"]) + normalized_model_score * float(self._model_rerank_scale)
 
         candidates.sort(key=lambda item: item["total_score"], reverse=True)
         selected = candidates[0]
