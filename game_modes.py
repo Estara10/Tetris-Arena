@@ -43,16 +43,6 @@ GAME_MODES = {
         ai_action_interval_ms=200,
         ai_mistake_chance=0.1,
     ),
-    "THREE_BODY": MatchMode(
-        key="THREE_BODY",
-        label="3体版",
-        description_lines=(
-            "33x25 三人大乱斗，下落位 9、17、25。",
-            "左右移动可传导推力给邻居；方块溢出结账。",
-        ),
-        ai_action_interval_ms=200,
-        ai_mistake_chance=0.1,
-    ),
 }
 
 AI_LEVELS = {

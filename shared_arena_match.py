@@ -25,6 +25,13 @@ class ArenaAIState:
         self.planned_piece_id = None
         self.target_x = 0
         self.rotation_steps_remaining = 0
+        self.plan_signature = None
+
+    def clear_plan(self):
+        self.planned_piece_id = None
+        self.target_x = 0
+        self.rotation_steps_remaining = 0
+        self.plan_signature = None
 
 
 class SharedArenaMatch:
@@ -249,7 +256,6 @@ class SharedArenaMatch:
 
         if state.rotation_steps_remaining > 0:
             cmd["rotate"] = True
-            state.rotation_steps_remaining -= 1
             return cmd
 
         if piece.x < state.target_x:
@@ -258,9 +264,58 @@ class SharedArenaMatch:
             cmd["dx"] = -1
         else:
             cmd["hard_drop"] = True
-            state.planned_piece_id = None
 
         return cmd
+
+    def _capture_grid_signature(self):
+        return tuple(tuple(row) for row in self.core.grid)
+
+    def _capture_piece_signature(self, piece) -> tuple | None:
+        if piece is None:
+            return None
+        return (
+            piece.shape_name,
+            int(piece.x),
+            int(piece.y),
+            tuple(tuple(row) for row in piece.matrix),
+        )
+
+    def _capture_plan_signature(self, ent: ArenaEntity):
+        other_piece_signatures = tuple(
+            (other.id, self._capture_piece_signature(other.piece))
+            for other in self.entities
+            if other.id != ent.id
+        )
+        return (
+            self._capture_grid_signature(),
+            self._capture_piece_signature(ent.piece),
+            other_piece_signatures,
+            tuple(sorted(self.push_rights.items())),
+        )
+
+    def _refresh_ai_plan_signature(self, ent: ArenaEntity):
+        if ent.is_player:
+            return
+        self.ai_states[ent.id].plan_signature = self._capture_plan_signature(ent)
+
+    def _invalidate_ai_plan(self, ent: ArenaEntity):
+        if ent.is_player:
+            return
+        self.ai_states[ent.id].clear_plan()
+
+    def _should_replan_ai(self, ent: ArenaEntity) -> bool:
+        piece = ent.piece
+        if piece is None:
+            return False
+
+        state = self.ai_states[ent.id]
+        if state.planned_piece_id != id(piece):
+            return True
+
+        if self.mode.key != "TRADITIONAL":
+            return False
+
+        return state.plan_signature != self._capture_plan_signature(ent)
 
     def _model_board_cols(self) -> int:
         return max(1, int(self._model_input_dim) - NEXT_STATE_AUX_FEATURE_COUNT)
@@ -398,13 +453,26 @@ class SharedArenaMatch:
                 if self.move_timers[ent.id] == 0:
                     ai_cmd = self._build_ai_command(ent)
                     if ai_cmd["rotate"]:
+                        before_signature = self._capture_piece_signature(ent.piece)
                         self.core.rotate_piece(ent.piece)
+                        after_signature = self._capture_piece_signature(ent.piece)
+                        if before_signature != after_signature:
+                            state = self.ai_states[ent.id]
+                            state.rotation_steps_remaining = max(0, state.rotation_steps_remaining - 1)
+                            self._refresh_ai_plan_signature(ent)
+                        else:
+                            self._invalidate_ai_plan(ent)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id] // 2
                     elif ai_cmd["soft_drop"]:
-                        self._soft_drop_or_lock(ent)
+                        moved = self._soft_drop_or_lock(ent)
+                        if moved:
+                            self._refresh_ai_plan_signature(ent)
+                        else:
+                            self._invalidate_ai_plan(ent)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id]
                     elif ai_cmd["hard_drop"]:
                         self.core.hard_drop_piece(ent)
+                        self._invalidate_ai_plan(ent)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id]
                     elif ai_cmd["dx"] != 0:
                         cmds[ent.id]["dx"] = ai_cmd["dx"]
@@ -430,6 +498,8 @@ class SharedArenaMatch:
                 if self.mode.key == "TRADITIONAL" and len(chain) > 1:
                     # The initiator must have push rights
                     if not self.push_rights[ent.id]:
+                        if not ent.is_player:
+                            self._invalidate_ai_plan(ent)
                         continue  # Cannot push!
                     
                     # If valid, initiator loses right, those pushed gain right
@@ -441,6 +511,15 @@ class SharedArenaMatch:
                 # Chain is valid, move everyone in the chain
                 for pushed_ent in chain:
                     pushed_ent.piece.x += dx
+                for pushed_ent in chain:
+                    if pushed_ent.is_player:
+                        continue
+                    if pushed_ent.id == ent.id:
+                        self._refresh_ai_plan_signature(pushed_ent)
+                    else:
+                        self._invalidate_ai_plan(pushed_ent)
+            elif not ent.is_player:
+                self._invalidate_ai_plan(ent)
 
     def _find_push_chain(self, start_ent: ArenaEntity, dx: int) -> list[ArenaEntity] | None:
         """Finds all entities pushed by start_ent moving dx.
@@ -502,12 +581,11 @@ class SharedArenaMatch:
 
     def _build_ai_command(self, ent: ArenaEntity) -> dict[str, int | bool]:
         piece = ent.piece
-        state = self.ai_states[ent.id]
         
         if piece is None or self.core.state != "RUNNING":
             return {"dx": 0, "rotate": False, "soft_drop": False, "hard_drop": False}
 
-        if state.planned_piece_id != id(piece):
+        if self._should_replan_ai(ent):
             self._plan_ai_piece(ent)
         return self._build_planned_command(ent)
 
@@ -519,9 +597,10 @@ class SharedArenaMatch:
         state = self.ai_states[ent.id]
         candidates = generate_candidates(self.core.grid, piece, self.arena_config)
         if not candidates:
-            state.rotation_steps_remaining = 0
+            state.clear_plan()
             state.target_x = piece.x
             state.planned_piece_id = id(piece)
+            self._refresh_ai_plan_signature(ent)
             return
 
         for candidate in candidates:
@@ -560,6 +639,7 @@ class SharedArenaMatch:
         state.rotation_steps_remaining = selected["rotation_steps"]
         state.target_x = selected["target_x"]
         state.planned_piece_id = id(piece)
+        self._refresh_ai_plan_signature(ent)
 
     def _settle_result(self, reason="结算"):
         high_score = -1

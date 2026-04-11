@@ -415,7 +415,7 @@ class DQNTrainer:
 
         self.device = self._resolve_device(self.config.device)
 
-        if self.config.game_mode in ("TRADITIONAL", "THREE_BODY"):
+        if self.config.game_mode == "TRADITIONAL":
             from shared_tetris_env import SharedTetrisEnv
             self.env = SharedTetrisEnv(
                 config=self.game_config,
@@ -484,7 +484,7 @@ class DQNTrainer:
         return device
 
     def _resolve_board_shape(self) -> tuple[int, int]:
-        if self.config.game_mode in ("TRADITIONAL", "THREE_BODY"):
+        if self.config.game_mode == "TRADITIONAL":
             return (
                 int(self.game_config.shared_arena_grid_rows),
                 int(self.game_config.shared_arena_grid_cols),
@@ -1067,8 +1067,8 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         type=str,
         default="CLASSIC",
-        choices=("CLASSIC", "TRADITIONAL", "THREE_BODY"),
-        help="目标游戏模式，输入 TRADITIONAL 为模式2训练, THREE_BODY 为模式3训练",
+        choices=("CLASSIC", "TRADITIONAL"),
+        help="目标游戏模式，输入 TRADITIONAL 为模式2训练",
     )
     parser.add_argument(
         "--opponent-mode",

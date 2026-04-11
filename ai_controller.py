@@ -557,11 +557,14 @@ class AIController:
                 pass
 
         for candidate in candidates:
-            future_score = best_future_score(
-                candidate["result_grid"],
-                game_core.next_piece,
-                self.config,
-            )
+            if self.lookahead_weight > 0.0:
+                future_score = best_future_score(
+                    candidate["result_grid"],
+                    game_core.next_piece,
+                    self.config,
+                )
+            else:
+                future_score = 0.0
             stack_risk = risk_penalty(candidate["result_grid"])
             target_bias = abs(candidate["target_x"] - self.config.grid_cols // 2) * 0.3
             candidate["total_score"] = (

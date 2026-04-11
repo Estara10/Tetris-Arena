@@ -69,11 +69,16 @@ class VersusMatch:
         if not configured_model_path.is_absolute():
             configured_model_path = Path(__file__).resolve().parent / configured_model_path
 
+        # 经典模式采用轻量启发式控制，避免模型分支回退导致主线程卡顿。
+        controller_mode = "heuristic" if self.mode.key == "CLASSIC" else "model"
+        controller_lookahead_weight = 0.0 if self.mode.key == "CLASSIC" else 0.28
+
         self.ai_controller = AIController(
             config=self.config,
             action_interval_ms=initial_action_interval,
             mistake_chance=initial_mistake_chance,
-            mode="model",
+            lookahead_weight=controller_lookahead_weight,
+            mode=controller_mode,
             model_path=str(configured_model_path),
         )
 

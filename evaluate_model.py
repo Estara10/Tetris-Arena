@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         type=str,
         default="TRADITIONAL",
-        choices=("CLASSIC", "TRADITIONAL", "THREE_BODY"),
+        choices=("CLASSIC", "TRADITIONAL"),
         help="评估目标模式",
     )
     parser.add_argument(

@@ -15,11 +15,6 @@ MODE_META = {
         "features": ("相向推挤", "消行得分"),
         "footer": "只有消行能得分，不要怕撞人！",
     },
-    "THREE_BODY": {
-        "tag": "同盘对抗",
-        "features": ("三体同盘", "大乱斗"),
-        "footer": "在宽敞的 33x25 棋盘中成为最终的活存者吧。",
-    },
 }
 
 LEVEL_META = {
@@ -400,16 +395,14 @@ def draw_mode_select_menu(screen, config: GameConfig, fonts):
         ("双屏同步", "中文界面", "单步移动"),
     )
 
-    mode_order = ("CLASSIC", "TRADITIONAL", "THREE_BODY")
+    mode_order = ("CLASSIC", "TRADITIONAL")
     key_hints = {
         "CLASSIC": "1",
         "TRADITIONAL": "2",
-        "THREE_BODY": "3",
     }
     accent_colors = {
         "CLASSIC": (97, 190, 246),
         "TRADITIONAL": (248, 150, 109),
-        "THREE_BODY": (162, 203, 114),
     }
 
     card_gap = 24
@@ -444,7 +437,7 @@ def draw_mode_select_menu(screen, config: GameConfig, fonts):
     draw_action_bar(
         screen,
         fonts,
-        ("按 1 进入经典模式", "按 2 进入挑战模式", "按 3 进入同盘竞技"),
+        ("按 1 进入经典模式", "按 2 进入挑战模式"),
     )
 
 

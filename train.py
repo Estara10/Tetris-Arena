@@ -157,7 +157,7 @@ def get_args():
         "--mode",
         type=str,
         default="TRADITIONAL",
-        choices=("CLASSIC", "TRADITIONAL", "THREE_BODY"),
+        choices=("CLASSIC", "TRADITIONAL"),
         help="训练模式",
     )
     parser.add_argument("--episodes", type=int, default=5000, help="训练回合数")
@@ -351,7 +351,7 @@ def _teacher_mix_prob_by_episode(episode_id: int, teacher_decay_episodes: int, o
 def _teacher_action(env, mode: str) -> int | None:
     try:
         normalized = str(mode).strip().upper()
-        if normalized in ("TRADITIONAL", "THREE_BODY"):
+        if normalized == "TRADITIONAL":
             match = getattr(env, "match", None)
             if match is None:
                 return None
@@ -391,7 +391,7 @@ def _teacher_action(env, mode: str) -> int | None:
 
 
 def _build_env(opt, seed: int, max_episode_steps: int):
-    if opt.mode in ("TRADITIONAL", "THREE_BODY"):
+    if opt.mode == "TRADITIONAL":
         return SharedTetrisEnv(
             mode_key=opt.mode,
             config=CONFIG,
@@ -490,7 +490,7 @@ def _to_tensor_batch(states: list[list[float]], device):
 
 def _extract_grid_for_heuristic(env, mode: str):
     normalized = str(mode).strip().upper()
-    if normalized in ("TRADITIONAL", "THREE_BODY") and hasattr(env, "match"):
+    if normalized == "TRADITIONAL" and hasattr(env, "match"):
         core = getattr(env.match, "core", None)
         if core is not None and hasattr(core, "grid"):
             return core.grid
