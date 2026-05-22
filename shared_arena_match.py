@@ -96,6 +96,10 @@ class SharedArenaMatch:
         self.base_font = build_ui_font(self.arena_config, 28)
         self.large_font = build_ui_font(self.arena_config, 48)
         self.small_font = build_ui_font(self.arena_config, 20)
+        self.panel_header_font = build_ui_font(self.arena_config, 17, bold=True)
+        self.panel_label_font = build_ui_font(self.arena_config, 16, bold=True)
+        self.panel_value_font = build_ui_font(self.arena_config, 17, bold=True)
+        self.panel_score_font = build_ui_font(self.arena_config, 23, bold=True)
         self.model_enabled = self.mode.key == "TRADITIONAL"
         self._model = None
         self._model_input_dim = 0
@@ -144,6 +148,90 @@ class SharedArenaMatch:
                 if not ent.is_player:
                     self.cooldown_ms[ent.id] = max(40, int(self.config.ai_model_action_interval_ms))
             self._try_load_shared_model()
+
+    def _lerp_color(self, color_a, color_b, ratio: float):
+        return tuple(
+            int(left + (right - left) * ratio)
+            for left, right in zip(color_a, color_b)
+        )
+
+    def _tint(self, color, amount: float):
+        return tuple(
+            max(0, min(255, int(channel + (255 - channel) * amount)))
+            for channel in color
+        )
+
+    def _shade(self, color, amount: float):
+        return tuple(
+            max(0, min(255, int(channel * (1.0 - amount))))
+            for channel in color
+        )
+
+    def _draw_vertical_gradient(self, rect, top_color, bottom_color):
+        for offset_y in range(rect.height):
+            ratio = offset_y / max(1, rect.height - 1)
+            color = self._lerp_color(top_color, bottom_color, ratio)
+            pygame.draw.line(
+                self.screen,
+                color,
+                (rect.x, rect.y + offset_y),
+                (rect.right, rect.y + offset_y),
+            )
+
+    def _draw_soft_glow(self, rect, color, spread=18, alpha=30, border_radius=8):
+        glow_surface = pygame.Surface(
+            (rect.width + spread * 2, rect.height + spread * 2),
+            pygame.SRCALPHA,
+        )
+        pygame.draw.rect(
+            glow_surface,
+            (color[0], color[1], color[2], alpha),
+            pygame.Rect(spread, spread, rect.width, rect.height),
+            border_radius=border_radius,
+        )
+        self.screen.blit(glow_surface, (rect.x - spread, rect.y - spread))
+
+    def _draw_card(self, rect, fill_color, border_color, glow_color=None, border_radius=8):
+        shadow_surface = pygame.Surface((rect.width + 30, rect.height + 30), pygame.SRCALPHA)
+        pygame.draw.rect(
+            shadow_surface,
+            (0, 0, 0, 96),
+            pygame.Rect(15, 15, rect.width, rect.height),
+            border_radius=border_radius,
+        )
+        self.screen.blit(shadow_surface, (rect.x - 15, rect.y - 9))
+
+        if glow_color is not None:
+            self._draw_soft_glow(rect, glow_color, spread=16, alpha=34, border_radius=border_radius)
+
+        pygame.draw.rect(self.screen, fill_color, rect, border_radius=border_radius)
+        pygame.draw.rect(
+            self.screen,
+            border_color,
+            rect,
+            2,
+            border_radius=border_radius,
+        )
+        pygame.draw.rect(
+            self.screen,
+            (48, 62, 86),
+            rect.inflate(-6, -6),
+            1,
+            border_radius=max(4, border_radius - 2),
+        )
+
+    def _draw_scene_backdrop(self):
+        full_rect = self.screen.get_rect()
+        self._draw_vertical_gradient(full_rect, (6, 9, 16), (13, 18, 29))
+
+        glow_overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        for y in range(0, full_rect.height, 42):
+            pygame.draw.line(glow_overlay, (120, 142, 178, 10), (0, y), (full_rect.width, y), 1)
+        for x in range(0, full_rect.width, 42):
+            pygame.draw.line(glow_overlay, (120, 142, 178, 8), (x, 0), (x, full_rect.height), 1)
+        pygame.draw.rect(glow_overlay, (68, 126, 192, 30), pygame.Rect(0, 0, full_rect.width, 4))
+
+        self.screen.blit(glow_overlay, (0, 0))
 
     def _build_arena_config(self, config: GameConfig) -> GameConfig:
         from dataclasses import replace
@@ -657,7 +745,7 @@ class SharedArenaMatch:
             self.winner_id = "Draw"
 
     def draw(self):
-        self.screen.fill((10, 14, 22))
+        self._draw_scene_backdrop()
         self._draw_board()
         self._draw_entities()
         self._draw_panel()
@@ -670,27 +758,42 @@ class SharedArenaMatch:
             self._draw_overlay(winner_text, "按 ESC 退出")
 
     def _draw_board(self):
-        pygame.draw.rect(self.screen, (20, 28, 42), self.board_rect)
-        pygame.draw.rect(self.screen, (94, 124, 166), self.board_rect, 2)
+        self._draw_soft_glow(self.board_rect, (88, 148, 224), spread=16, alpha=26, border_radius=0)
+        self._draw_vertical_gradient(self.board_rect, (14, 20, 34), (4, 8, 16))
+        pygame.draw.rect(self.screen, (38, 58, 86), self.board_rect, 2)
+        pygame.draw.rect(self.screen, (112, 156, 220), self.board_rect, 4)
 
         for x in range(self.arena_config.grid_cols + 1):
             px = self.board_rect.x + x * self.cell_size
-            pygame.draw.line(self.screen, (56, 70, 94), (px, self.board_rect.y), (px, self.board_rect.bottom), 1)
+            is_major = x % 5 == 0
+            pygame.draw.line(
+                self.screen,
+                (74, 96, 126) if is_major else (46, 60, 84),
+                (px, self.board_rect.y),
+                (px, self.board_rect.bottom),
+                2 if is_major else 1,
+            )
         for y in range(self.arena_config.grid_rows + 1):
             py = self.board_rect.y + y * self.cell_size
-            pygame.draw.line(self.screen, (56, 70, 94), (self.board_rect.x, py), (self.board_rect.right, py), 1)
+            is_major = y % 5 == 0
+            pygame.draw.line(
+                self.screen,
+                (74, 96, 126) if is_major else (46, 60, 84),
+                (self.board_rect.x, py),
+                (self.board_rect.right, py),
+                2 if is_major else 1,
+            )
 
-        # Draw static grid
         for row_idx, row in enumerate(self.core.grid):
             for col_idx, cell in enumerate(row):
                 if cell != 0:
-                    self._draw_block(col_idx, row_idx, (100, 100, 100))
+                    self._draw_block(col_idx, row_idx, (126, 132, 154))
 
     def _draw_entities(self):
         colors = {
-            "player": (0, 255, 200),
-            "ai1": (255, 100, 100),
-            "ai2": (255, 200, 100)
+            "player": (82, 242, 214),
+            "ai1": (255, 116, 116),
+            "ai2": (255, 202, 112)
         }
         for ent in self.entities:
             c = colors.get(ent.id, (255, 255, 255))
@@ -700,8 +803,7 @@ class SharedArenaMatch:
                     for col, cell in enumerate(row):
                         if cell == "X":
                             self._draw_block(piece.x + col, piece.y + r, c)
-                            # ghost block?
-                
+
                 ghost_y = self.core.get_ghost_y(piece)
                 for r, row in enumerate(piece.matrix):
                     for col, cell in enumerate(row):
@@ -709,55 +811,147 @@ class SharedArenaMatch:
                             bx = self.board_rect.x + (piece.x + col) * self.cell_size
                             by = self.board_rect.y + (ghost_y + r) * self.cell_size
                             rect = pygame.Rect(bx, by, self.cell_size, self.cell_size)
-                            pygame.draw.rect(self.screen, c, rect, 1)
+                            ghost_color = self._tint(c, 0.12)
+                            pygame.draw.rect(self.screen, ghost_color, rect, 1, border_radius=5)
 
     def _draw_block(self, col: int, row: int, color):
-        if row < 0: return
+        if row < 0:
+            return
         x = self.board_rect.x + col * self.cell_size
         y = self.board_rect.y + row * self.cell_size
         rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
-        pygame.draw.rect(self.screen, color, rect)
-        pygame.draw.rect(self.screen, (255, 255, 255), rect, 1)
+        inner_rect = rect.inflate(-2, -2)
+        shadow_rect = inner_rect.move(0, 2)
+        radius = max(4, self.cell_size // 5)
+        dark_color = self._shade(color, 0.40)
+        light_color = self._tint(color, 0.28)
+        pygame.draw.rect(self.screen, dark_color, shadow_rect, border_radius=radius)
+        pygame.draw.rect(self.screen, color, inner_rect, border_radius=radius)
+        highlight_rect = pygame.Rect(
+            inner_rect.x + 2,
+            inner_rect.y + 2,
+            max(4, inner_rect.width - 4),
+            max(4, self.cell_size // 3),
+        )
+        pygame.draw.rect(self.screen, light_color, highlight_rect, border_radius=max(4, radius - 1))
+        pygame.draw.rect(self.screen, (255, 255, 255), inner_rect, 1, border_radius=radius)
 
     def _draw_panel(self):
-        sw, sh = self.screen.get_size()
         panel_rect = pygame.Rect(self.board_rect.right + 20, self.board_rect.y, 250, self.board_height)
-        pygame.draw.rect(self.screen, (20, 28, 42), panel_rect)
-        pygame.draw.rect(self.screen, (94, 124, 166), panel_rect, 2)
-        
-        mins, secs = divmod(self.remaining_ms // 1000, 60)
-        t_surf = self.base_font.render(f"时间: {mins:02d}:{secs:02d}", True, (255, 255, 255))
-        self.screen.blit(t_surf, (panel_rect.x + 20, panel_rect.y + 20))
-        
-        y_offset = 80
-        strategy = "模型落点评分" if self.model_enabled and self._model is not None else "启发式回退"
-        strategy_surf = self.small_font.render(f"AI策略: {strategy}", True, (220, 220, 220))
-        self.screen.blit(strategy_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
-        y_offset += 34
+        self._draw_card(
+            panel_rect,
+            (17, 23, 36),
+            (94, 124, 166),
+            glow_color=(108, 170, 255),
+            border_radius=10,
+        )
 
-        model_name = self._model_path.name
-        path_surf = self.small_font.render(f"模型: {model_name}", True, (210, 210, 210))
-        self.screen.blit(path_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
-        y_offset += 34
+        header_surface = self.panel_header_font.render("共享竞技场", True, (128, 212, 255))
+        self.screen.blit(header_surface, (panel_rect.x + 20, panel_rect.y + 20))
+
+        mins, secs = divmod(self.remaining_ms // 1000, 60)
+        timer_card = pygame.Rect(panel_rect.x + 16, panel_rect.y + 50, panel_rect.width - 32, 84)
+        self._draw_card(
+            timer_card,
+            (12, 18, 30),
+            (84, 122, 178),
+            glow_color=(90, 166, 255),
+            border_radius=8,
+        )
+        t_surf = self.base_font.render(f"{mins:02d}:{secs:02d}", True, (248, 250, 255))
+        t_rect = t_surf.get_rect(center=(timer_card.centerx, timer_card.centery + 4))
+        timer_label = self.panel_label_font.render("剩余时间", True, (174, 190, 218))
+        self.screen.blit(timer_label, (timer_card.x + 18, timer_card.y + 12))
+        self.screen.blit(t_surf, t_rect)
+
+        y_offset = timer_card.bottom + 18
+        strategy = "模型落点评分" if self.model_enabled and self._model is not None else "启发式回退"
+        for label, value in (
+            ("AI策略", strategy),
+            ("模型", self._model_path.name),
+        ):
+            card_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 64)
+            self._draw_card(
+                card_rect,
+                (12, 18, 30),
+                (70, 98, 136),
+                border_radius=8,
+            )
+            label_surf = self.panel_label_font.render(label, True, (160, 178, 206))
+            value_surf = self.panel_value_font.render(value, True, (234, 240, 248))
+            self.screen.blit(label_surf, (card_rect.x + 16, card_rect.y + 11))
+            self.screen.blit(value_surf, (card_rect.x + 16, card_rect.y + 33))
+            y_offset += 76
 
         if self._model_error:
-            clipped = self._model_error[:24]
-            error_surf = self.small_font.render(f"状态: {clipped}", True, (255, 180, 160))
-            self.screen.blit(error_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
-            y_offset += 34
+            error_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 72)
+            self._draw_card(
+                error_rect,
+                (42, 22, 24),
+                (174, 92, 84),
+                glow_color=(255, 126, 112),
+                border_radius=8,
+            )
+            clipped = self._model_error[:20]
+            title_surf = self.panel_label_font.render("状态提示", True, (255, 192, 178))
+            error_surf = self.panel_value_font.render(clipped, True, (255, 226, 214))
+            self.screen.blit(title_surf, (error_rect.x + 16, error_rect.y + 12))
+            self.screen.blit(error_surf, (error_rect.x + 16, error_rect.y + 38))
+            y_offset += 84
 
+        score_colors = {
+            "player": (82, 242, 214),
+            "ai1": (255, 116, 116),
+            "ai2": (255, 202, 112),
+        }
         for ent in self.entities:
-            s_surf = self.small_font.render(f"{ent.id}: {ent.score} 分", True, (255, 255, 255))
-            self.screen.blit(s_surf, (panel_rect.x + 20, panel_rect.y + y_offset))
-            y_offset += 40
+            accent = score_colors.get(ent.id, (180, 190, 210))
+            score_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 76)
+            self._draw_card(
+                score_rect,
+                (12, 18, 30),
+                self._tint(accent, 0.18),
+                glow_color=accent,
+                border_radius=8,
+            )
+            accent_bar = pygame.Rect(score_rect.x + 16, score_rect.y + 12, score_rect.width - 32, 4)
+            pygame.draw.rect(self.screen, accent, accent_bar, border_radius=2)
+            name_surf = self.panel_label_font.render(ent.id.upper(), True, (172, 188, 214))
+            score_surf = self.panel_score_font.render(str(ent.score), True, (248, 250, 255))
+            unit_surf = self.panel_label_font.render("分", True, (172, 188, 214))
+            name_y = score_rect.y + 20
+            score_y = score_rect.y + 40
+            unit_x = score_rect.x + 16 + score_surf.get_width() + 10
+            unit_y = score_y + score_surf.get_height() - unit_surf.get_height() - 1
+            self.screen.blit(name_surf, (score_rect.x + 16, name_y))
+            self.screen.blit(score_surf, (score_rect.x + 16, score_y))
+            self.screen.blit(unit_surf, (unit_x, unit_y))
+            y_offset += 88
 
     def _draw_overlay(self, title: str, subtitle: str):
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((6, 10, 18, 182))
+        pygame.draw.circle(
+            overlay,
+            (102, 176, 255, 28),
+            (self.screen.get_width() // 2, self.screen.get_height() // 2 - 40),
+            250,
+        )
         self.screen.blit(overlay, (0, 0))
-        
+
         sw, sh = self.screen.get_size()
+        card_rect = pygame.Rect(0, 0, 520, 184)
+        card_rect.center = (sw // 2, sh // 2)
+        self._draw_card(
+            card_rect,
+            (17, 23, 36),
+            (102, 140, 196),
+            glow_color=(104, 170, 255),
+            border_radius=10,
+        )
+        accent_bar = pygame.Rect(card_rect.x + 26, card_rect.y + 18, card_rect.width - 52, 6)
+        pygame.draw.rect(self.screen, (118, 196, 255), accent_bar, border_radius=2)
         t_surf = self.large_font.render(title, True, (255, 255, 255))
         s_surf = self.base_font.render(subtitle, True, (200, 200, 200))
-        self.screen.blit(t_surf, (sw // 2 - t_surf.get_width() // 2, sh // 2 - 50))
-        self.screen.blit(s_surf, (sw // 2 - s_surf.get_width() // 2, sh // 2 + 20))
+        self.screen.blit(t_surf, (sw // 2 - t_surf.get_width() // 2, card_rect.y + 64))
+        self.screen.blit(s_surf, (sw // 2 - s_surf.get_width() // 2, card_rect.y + 116))

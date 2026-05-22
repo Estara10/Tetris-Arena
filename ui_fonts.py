@@ -39,14 +39,14 @@ def build_ui_font(config: GameConfig, size: int, bold: bool = False):
 def build_menu_fonts(config: GameConfig):
     pygame.font.init()
 
-    title_size = max(42, min(54, config.screen_height // 18))
-    subtitle_size = max(22, min(26, config.screen_height // 34))
-    card_title_size = max(24, min(32, config.screen_height // 30))
-    card_text_size = max(18, min(20, config.screen_height // 48))
-    hint_size = max(16, min(18, config.screen_height // 58))
-    keycap_size = max(22, min(28, config.screen_height // 34))
-    small_size = max(14, min(17, config.screen_height // 64))
-    stat_size = max(16, min(18, config.screen_height // 54))
+    title_size = max(36, min(46, config.screen_height // 22))
+    subtitle_size = max(18, min(22, config.screen_height // 42))
+    card_title_size = max(21, min(26, config.screen_height // 40))
+    card_text_size = max(14, min(17, config.screen_height // 62))
+    hint_size = max(13, min(16, config.screen_height // 70))
+    keycap_size = max(20, min(24, config.screen_height // 42))
+    small_size = max(12, min(14, config.screen_height // 76))
+    stat_size = max(13, min(15, config.screen_height // 68))
 
     return {
         "title": build_ui_font(config, title_size, bold=True),

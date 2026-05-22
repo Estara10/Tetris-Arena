@@ -112,6 +112,66 @@ class VersusMatch:
         self._processed_player_locks = self.player_core.lock_count
         self._processed_ai_locks = self.ai_core.lock_count
 
+    def _lerp_color(self, color_a, color_b, ratio: float):
+        return tuple(
+            int(left + (right - left) * ratio)
+            for left, right in zip(color_a, color_b)
+        )
+
+    def _draw_vertical_gradient(self, rect, top_color, bottom_color):
+        for offset_y in range(rect.height):
+            ratio = offset_y / max(1, rect.height - 1)
+            color = self._lerp_color(top_color, bottom_color, ratio)
+            pygame.draw.line(
+                self.screen,
+                color,
+                (rect.x, rect.y + offset_y),
+                (rect.right, rect.y + offset_y),
+            )
+
+    def _draw_soft_glow(self, rect, color, spread=18, alpha=30, border_radius=8):
+        glow_surface = pygame.Surface(
+            (rect.width + spread * 2, rect.height + spread * 2),
+            pygame.SRCALPHA,
+        )
+        pygame.draw.rect(
+            glow_surface,
+            (color[0], color[1], color[2], alpha),
+            pygame.Rect(spread, spread, rect.width, rect.height),
+            border_radius=border_radius,
+        )
+        self.screen.blit(glow_surface, (rect.x - spread, rect.y - spread))
+
+    def _draw_card(self, rect, fill_color, border_color, glow_color=None, border_radius=8):
+        shadow_surface = pygame.Surface((rect.width + 32, rect.height + 32), pygame.SRCALPHA)
+        pygame.draw.rect(
+            shadow_surface,
+            (0, 0, 0, 94),
+            pygame.Rect(16, 16, rect.width, rect.height),
+            border_radius=border_radius,
+        )
+        self.screen.blit(shadow_surface, (rect.x - 16, rect.y - 10))
+
+        if glow_color is not None:
+            self._draw_soft_glow(rect, glow_color, spread=16, alpha=36, border_radius=border_radius)
+
+        pygame.draw.rect(self.screen, fill_color, rect, border_radius=border_radius)
+        pygame.draw.rect(self.screen, (48, 62, 86), rect.inflate(-6, -6), 1, border_radius=max(4, border_radius - 2))
+        pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=border_radius)
+
+    def _draw_scene_backdrop(self):
+        full_rect = self.screen.get_rect()
+        self._draw_vertical_gradient(full_rect, (6, 9, 16), (13, 18, 29))
+
+        glow_overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        for y in range(0, full_rect.height, 42):
+            pygame.draw.line(glow_overlay, (120, 142, 178, 10), (0, y), (full_rect.width, y), 1)
+        for x in range(0, full_rect.width, 42):
+            pygame.draw.line(glow_overlay, (120, 142, 178, 8), (x, 0), (x, full_rect.height), 1)
+        pygame.draw.rect(glow_overlay, (68, 126, 192, 30), pygame.Rect(0, 0, full_rect.width, 4))
+
+        self.screen.blit(glow_overlay, (0, 0))
+
     def toggle_pause(self):
         if self.finished:
             return
@@ -167,7 +227,7 @@ class VersusMatch:
         self._update_match_result()
 
     def draw(self):
-        self.screen.fill((8, 11, 18))
+        self._draw_scene_backdrop()
         self._draw_gap_background()
 
         self.player_renderer.draw(
@@ -187,7 +247,6 @@ class VersusMatch:
             overlay_hint=self._overlay_hint(self.ai_core, waiting_for="玩家"),
         )
 
-        self._draw_mode_pill()
         self._draw_board_frames()
 
         if self.finished:
@@ -505,14 +564,26 @@ class VersusMatch:
             self.config.versus_gap,
             self.config.screen_height,
         )
-        pygame.draw.rect(self.screen, (12, 16, 26), gap_rect)
+        self._draw_vertical_gradient(gap_rect, (13, 18, 32), (8, 12, 22))
         pygame.draw.line(
             self.screen,
-            (44, 52, 76),
-            (gap_rect.centerx, 16),
-            (gap_rect.centerx, self.config.screen_height - 16),
+            (66, 90, 128),
+            (gap_rect.centerx, 28),
+            (gap_rect.centerx, self.config.screen_height - 28),
             2,
         )
+        badge_rect = pygame.Rect(0, 0, min(112, gap_rect.width - 6), 52)
+        badge_rect.center = (gap_rect.centerx, self.config.screen_height // 2)
+        self._draw_card(
+            badge_rect,
+            (18, 24, 38),
+            (92, 126, 178),
+            glow_color=(92, 160, 255),
+            border_radius=8,
+        )
+        vs_surface = self.result_body_font.render("VS", True, (242, 246, 255))
+        vs_rect = vs_surface.get_rect(center=badge_rect.center)
+        self.screen.blit(vs_surface, vs_rect)
 
     def _draw_mode_pill(self):
         text_value = self.mode.label
@@ -523,13 +594,20 @@ class VersusMatch:
             text_value = f"{text_value} · 模型AI"
 
         text = self.mode_font.render(text_value, True, (235, 240, 255))
-        pill_rect = pygame.Rect(0, 0, text.get_width() + 34, text.get_height() + 16)
+        pill_rect = pygame.Rect(0, 0, text.get_width() + 42, text.get_height() + 18)
         pill_rect.centerx = self.screen.get_width() // 2
         pill_rect.y = 18
 
-        pygame.draw.rect(self.screen, (22, 28, 42), pill_rect, border_radius=18)
-        pygame.draw.rect(self.screen, (100, 120, 170), pill_rect, 2, border_radius=18)
-        self.screen.blit(text, (pill_rect.x + 17, pill_rect.y + 8))
+        self._draw_card(
+            pill_rect,
+            (17, 23, 36),
+            (105, 138, 190),
+            glow_color=(102, 168, 255),
+            border_radius=8,
+        )
+        accent_bar = pygame.Rect(pill_rect.x + 18, pill_rect.y + 10, pill_rect.width - 36, 4)
+        pygame.draw.rect(self.screen, (128, 196, 255), accent_bar, border_radius=2)
+        self.screen.blit(text, (pill_rect.x + 21, pill_rect.y + 10))
 
     def _draw_board_frames(self):
         left_color = (74, 112, 148)
@@ -540,32 +618,62 @@ class VersusMatch:
         elif self.finished and self.result_title == "AI 获胜":
             right_color = (255, 130, 120)
 
-        pygame.draw.rect(self.screen, left_color, self.left_rect, 3)
-        pygame.draw.rect(self.screen, right_color, self.right_rect, 3)
+        for rect, color in ((self.left_rect, left_color), (self.right_rect, right_color)):
+            self._draw_soft_glow(rect, color, spread=12, alpha=24, border_radius=0)
+            pygame.draw.rect(self.screen, self._lerp_color(color, (255, 255, 255), 0.18), rect, 1)
+            pygame.draw.rect(self.screen, color, rect, 3)
+            corner = 20
+            pygame.draw.line(self.screen, color, (rect.x, rect.y), (rect.x + corner, rect.y), 4)
+            pygame.draw.line(self.screen, color, (rect.x, rect.y), (rect.x, rect.y + corner), 4)
+            pygame.draw.line(self.screen, color, (rect.right, rect.y), (rect.right - corner, rect.y), 4)
+            pygame.draw.line(self.screen, color, (rect.right, rect.y), (rect.right, rect.y + corner), 4)
+            pygame.draw.line(self.screen, color, (rect.x, rect.bottom), (rect.x + corner, rect.bottom), 4)
+            pygame.draw.line(self.screen, color, (rect.x, rect.bottom), (rect.x, rect.bottom - corner), 4)
+            pygame.draw.line(self.screen, color, (rect.right, rect.bottom), (rect.right - corner, rect.bottom), 4)
+            pygame.draw.line(self.screen, color, (rect.right, rect.bottom), (rect.right, rect.bottom - corner), 4)
 
     def _draw_result_overlay(self):
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((6, 10, 18, 172))
+        pygame.draw.circle(
+            overlay,
+            (100, 178, 255, 32),
+            (self.screen.get_width() // 2, self.screen.get_height() // 2 - 40),
+            240,
+        )
         self.screen.blit(overlay, (0, 0))
 
-        card_rect = pygame.Rect(0, 0, 760, 240)
+        accent = (104, 170, 255)
+        if self.result_title in ("玩家获胜", "挑战成功"):
+            accent = (102, 228, 255)
+        elif self.result_title == "AI 获胜":
+            accent = (255, 132, 118)
+
+        card_rect = pygame.Rect(0, 0, 760, 254)
         card_rect.center = (
             self.screen.get_width() // 2,
             self.screen.get_height() // 2,
         )
 
-        pygame.draw.rect(self.screen, (18, 24, 38), card_rect, border_radius=26)
-        pygame.draw.rect(self.screen, (96, 140, 214), card_rect, 2, border_radius=26)
+        self._draw_card(
+            card_rect,
+            (17, 23, 36),
+            (96, 140, 214),
+            glow_color=accent,
+            border_radius=10,
+        )
+        accent_bar = pygame.Rect(card_rect.x + 28, card_rect.y + 18, card_rect.width - 56, 6)
+        pygame.draw.rect(self.screen, accent, accent_bar, border_radius=2)
 
         title_surface = self.result_title_font.render(
             self.result_title,
             True,
-            (248, 248, 248),
+            (248, 250, 255),
         )
-        title_rect = title_surface.get_rect(center=(card_rect.centerx, card_rect.y + 56))
+        title_rect = title_surface.get_rect(center=(card_rect.centerx, card_rect.y + 64))
         self.screen.blit(title_surface, title_rect)
 
-        text_y = card_rect.y + 106
+        text_y = card_rect.y + 118
         for line in self.result_lines:
             text_surface = self.result_body_font.render(line, True, (220, 228, 240))
             text_rect = text_surface.get_rect(center=(card_rect.centerx, text_y))
