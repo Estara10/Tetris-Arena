@@ -68,7 +68,7 @@ class SharedArenaMatch:
             entities=self.entities,
         )
 
-        self.cell_size = 24
+        self.cell_size = 31
         
         self.board_width = self.arena_config.grid_cols * self.cell_size
         self.board_height = self.arena_config.grid_rows * self.cell_size
@@ -142,6 +142,8 @@ class SharedArenaMatch:
         self._player_right_held = False
 
         self.winner_id = None
+        self._line_clear_effects: list[dict] = []
+        self._anim_time_ms = 0
 
         if self.model_enabled:
             for ent in self.entities:
@@ -195,14 +197,14 @@ class SharedArenaMatch:
         shadow_surface = pygame.Surface((rect.width + 30, rect.height + 30), pygame.SRCALPHA)
         pygame.draw.rect(
             shadow_surface,
-            (0, 0, 0, 96),
+            (0, 0, 0, 35),
             pygame.Rect(15, 15, rect.width, rect.height),
             border_radius=border_radius,
         )
         self.screen.blit(shadow_surface, (rect.x - 15, rect.y - 9))
 
         if glow_color is not None:
-            self._draw_soft_glow(rect, glow_color, spread=16, alpha=34, border_radius=border_radius)
+            self._draw_soft_glow(rect, glow_color, spread=14, alpha=22, border_radius=border_radius)
 
         pygame.draw.rect(self.screen, fill_color, rect, border_radius=border_radius)
         pygame.draw.rect(
@@ -214,7 +216,7 @@ class SharedArenaMatch:
         )
         pygame.draw.rect(
             self.screen,
-            (48, 62, 86),
+            (210, 218, 232),
             rect.inflate(-6, -6),
             1,
             border_radius=max(4, border_radius - 2),
@@ -222,14 +224,26 @@ class SharedArenaMatch:
 
     def _draw_scene_backdrop(self):
         full_rect = self.screen.get_rect()
-        self._draw_vertical_gradient(full_rect, (6, 9, 16), (13, 18, 29))
+        self._draw_vertical_gradient(full_rect, (228, 232, 242), (208, 213, 228))
 
         glow_overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        for y in range(0, full_rect.height, 42):
-            pygame.draw.line(glow_overlay, (120, 142, 178, 10), (0, y), (full_rect.width, y), 1)
-        for x in range(0, full_rect.width, 42):
-            pygame.draw.line(glow_overlay, (120, 142, 178, 8), (x, 0), (x, full_rect.height), 1)
-        pygame.draw.rect(glow_overlay, (68, 126, 192, 30), pygame.Rect(0, 0, full_rect.width, 4))
+        for y in range(0, full_rect.height, 36):
+            alpha = 14 if y % 72 == 0 else 6
+            pygame.draw.line(glow_overlay, (140, 150, 175, alpha), (0, y), (full_rect.width, y), 1)
+        for x in range(0, full_rect.width, 36):
+            alpha = 12 if x % 72 == 0 else 5
+            pygame.draw.line(glow_overlay, (140, 150, 175, alpha), (x, 0), (x, full_rect.height), 1)
+
+        for i in range(0, full_rect.height, 120):
+            dash_y = i
+            for dx in range(0, full_rect.width, 48):
+                pygame.draw.rect(glow_overlay, (100, 140, 200, 8),
+                                 pygame.Rect(dx, dash_y, 24, 1))
+                pygame.draw.rect(glow_overlay, (200, 140, 100, 6),
+                                 pygame.Rect(dx + 26, dash_y + 60, 18, 1))
+
+        pygame.draw.rect(glow_overlay, (70, 150, 225, 28), pygame.Rect(0, 0, full_rect.width, 4))
+        pygame.draw.rect(glow_overlay, (230, 140, 80, 22), pygame.Rect(0, full_rect.height - 4, full_rect.width, 4))
 
         self.screen.blit(glow_overlay, (0, 0))
 
@@ -239,12 +253,12 @@ class SharedArenaMatch:
             cols, rows = 25, 25
             score_on_lock = False
             score_mapping = {1: 1, 2: 2, 3: 3, 4: 4}
-            duration_ms = 180000 * 999  # 相当于无限制时间，直到溢出
+            duration_ms = 300000  # 5分钟限时
         else:
             cols, rows = 33, 25
             score_on_lock = True
             score_mapping = {1: 0, 2: 0, 3: 0, 4: 0} # 只有落子得分
-            duration_ms = 180000
+            duration_ms = 300000  # 5分钟限时
 
         return replace(
             config,
@@ -277,6 +291,7 @@ class SharedArenaMatch:
             p_ent = self._get_entity("player")
             if p_ent and p_ent.piece:
                 self.core.hard_drop_piece(p_ent)
+                self._capture_line_clear_effects()
                 self.move_timers["player"] = self.cooldown_ms["player"] // 2
         return None
 
@@ -306,8 +321,25 @@ class SharedArenaMatch:
         if not self.core.is_valid_position(piece):
             return False
 
+        cleared_before = self.core.last_cleared_rows.copy()
         self.core.lock_piece(ent)
+        if self.core.last_cleared_rows:
+            for row_idx in self.core.last_cleared_rows:
+                self._line_clear_effects.append({
+                    "row": row_idx,
+                    "start_ms": self._anim_time_ms,
+                    "duration_ms": 450,
+                })
         return False
+
+    def _capture_line_clear_effects(self):
+        if self.core.last_cleared_rows:
+            for row_idx in self.core.last_cleared_rows:
+                self._line_clear_effects.append({
+                    "row": row_idx,
+                    "start_ms": self._anim_time_ms,
+                    "duration_ms": 450,
+                })
 
     def _try_load_shared_model(self):
         if torch is None:
@@ -500,6 +532,7 @@ class SharedArenaMatch:
         if self.finished or self.paused:
             return
 
+        self._anim_time_ms += dt
         self.remaining_ms = max(0, self.remaining_ms - dt)
         
         # Update cooldown timers
@@ -560,6 +593,7 @@ class SharedArenaMatch:
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id]
                     elif ai_cmd["hard_drop"]:
                         self.core.hard_drop_piece(ent)
+                        self._capture_line_clear_effects()
                         self._invalidate_ai_plan(ent)
                         self.move_timers[ent.id] = self.cooldown_ms[ent.id]
                     elif ai_cmd["dx"] != 0:
@@ -747,6 +781,7 @@ class SharedArenaMatch:
     def draw(self):
         self._draw_scene_backdrop()
         self._draw_board()
+        self._draw_line_clear_effects()
         self._draw_entities()
         self._draw_panel()
 
@@ -754,21 +789,54 @@ class SharedArenaMatch:
             self._draw_overlay("已暂停", "按 W 或 P 继续")
 
         if self.finished:
-            winner_text = "平局!" if self.winner_id == "Draw" else f"{self.winner_id} 获胜!"
-            self._draw_overlay(winner_text, "按 ESC 退出")
+            if self.winner_id == "Draw":
+                self._draw_overlay("平局!", "按 ESC 退出")
+            elif self.winner_id == "player":
+                self._draw_overlay("你的代码没有我的手速快\n菜就多练", "按 ESC 退出")
+            else:
+                self._draw_overlay("人类一败涂地\n菜就多练", "按 ESC 退出")
+
+    def _draw_line_clear_effects(self):
+        now = self._anim_time_ms
+        alive = []
+        for effect in self._line_clear_effects:
+            elapsed = now - effect["start_ms"]
+            if elapsed > effect["duration_ms"]:
+                continue
+            alive.append(effect)
+            progress = elapsed / effect["duration_ms"]
+            alpha = int(180 * (1.0 - progress))
+            if alpha <= 0:
+                continue
+            row_y = int(self.board_rect.y + effect["row"] * self.cell_size)
+            flash_rect = pygame.Rect(
+                self.board_rect.x, row_y,
+                self.board_rect.width, self.cell_size,
+            )
+            flash_surf = pygame.Surface((flash_rect.width, flash_rect.height), pygame.SRCALPHA)
+            flash_surf.fill((255, 255, 220, alpha))
+            self.screen.blit(flash_surf, (flash_rect.x, flash_rect.y))
+            glow_spread = int(8 * (1.0 - progress))
+            if glow_spread > 0:
+                glow_alpha = max(1, alpha // 3)
+                glow_rect = flash_rect.inflate(glow_spread * 2, glow_spread * 2)
+                glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                glow_surf.fill((255, 240, 180, glow_alpha))
+                self.screen.blit(glow_surf, (glow_rect.x, glow_rect.y))
+        self._line_clear_effects = alive
 
     def _draw_board(self):
-        self._draw_soft_glow(self.board_rect, (88, 148, 224), spread=16, alpha=26, border_radius=0)
-        self._draw_vertical_gradient(self.board_rect, (14, 20, 34), (4, 8, 16))
-        pygame.draw.rect(self.screen, (38, 58, 86), self.board_rect, 2)
-        pygame.draw.rect(self.screen, (112, 156, 220), self.board_rect, 4)
+        self._draw_soft_glow(self.board_rect, (120, 155, 210), spread=14, alpha=18, border_radius=4)
+        self._draw_vertical_gradient(self.board_rect, (245, 247, 252), (235, 238, 246))
+        pygame.draw.rect(self.screen, (185, 195, 215), self.board_rect, 2)
+        pygame.draw.rect(self.screen, (150, 170, 200), self.board_rect, 3)
 
         for x in range(self.arena_config.grid_cols + 1):
             px = self.board_rect.x + x * self.cell_size
             is_major = x % 5 == 0
             pygame.draw.line(
                 self.screen,
-                (74, 96, 126) if is_major else (46, 60, 84),
+                (190, 198, 215) if is_major else (215, 220, 232),
                 (px, self.board_rect.y),
                 (px, self.board_rect.bottom),
                 2 if is_major else 1,
@@ -778,7 +846,7 @@ class SharedArenaMatch:
             is_major = y % 5 == 0
             pygame.draw.line(
                 self.screen,
-                (74, 96, 126) if is_major else (46, 60, 84),
+                (190, 198, 215) if is_major else (215, 220, 232),
                 (self.board_rect.x, py),
                 (self.board_rect.right, py),
                 2 if is_major else 1,
@@ -787,32 +855,51 @@ class SharedArenaMatch:
         for row_idx, row in enumerate(self.core.grid):
             for col_idx, cell in enumerate(row):
                 if cell != 0:
-                    self._draw_block(col_idx, row_idx, (126, 132, 154))
+                    self._draw_block(col_idx, row_idx, (170, 175, 190))
 
     def _draw_entities(self):
         colors = {
-            "player": (82, 242, 214),
-            "ai1": (255, 116, 116),
-            "ai2": (255, 202, 112)
+            "player": (0, 210, 225),
+            "ai1": (240, 95, 85),
+            "ai2": (248, 195, 100),
         }
         for ent in self.entities:
             c = colors.get(ent.id, (255, 255, 255))
             piece = getattr(ent, "piece", None)
             if piece:
+                # Ghost piece first (under the active piece)
+                ghost_y = self.core.get_ghost_y(piece)
+                if ghost_y >= 0:
+                    for r, row in enumerate(piece.matrix):
+                        for col, cell in enumerate(row):
+                            if cell == "X":
+                                gx = self.board_rect.x + (piece.x + col) * self.cell_size
+                                gy = self.board_rect.y + (ghost_y + r) * self.cell_size
+                                grect = pygame.Rect(gx, gy, self.cell_size, self.cell_size)
+                                inner_grect = grect.inflate(-3, -3)
+                                ghost_color = self._tint(c, 0.35)
+                                ghost_dark = self._shade(c, 0.30)
+                                gr = max(4, self.cell_size // 5)
+                                pygame.draw.rect(self.screen, ghost_dark, inner_grect, 2, border_radius=gr)
+                                dash_len = max(2, self.cell_size // 12)
+                                for dash_x in range(inner_grect.x, inner_grect.right, dash_len * 3):
+                                    px = min(dash_x, inner_grect.right - dash_len)
+                                    pygame.draw.rect(
+                                        self.screen, ghost_color,
+                                        pygame.Rect(px, inner_grect.y, dash_len, 2),
+                                        border_radius=1,
+                                    )
+                                    pygame.draw.rect(
+                                        self.screen, ghost_color,
+                                        pygame.Rect(px, inner_grect.bottom - 2, dash_len, 2),
+                                        border_radius=1,
+                                    )
+
+                # Active piece
                 for r, row in enumerate(piece.matrix):
                     for col, cell in enumerate(row):
                         if cell == "X":
                             self._draw_block(piece.x + col, piece.y + r, c)
-
-                ghost_y = self.core.get_ghost_y(piece)
-                for r, row in enumerate(piece.matrix):
-                    for col, cell in enumerate(row):
-                        if cell == "X" and ghost_y >= 0:
-                            bx = self.board_rect.x + (piece.x + col) * self.cell_size
-                            by = self.board_rect.y + (ghost_y + r) * self.cell_size
-                            rect = pygame.Rect(bx, by, self.cell_size, self.cell_size)
-                            ghost_color = self._tint(c, 0.12)
-                            pygame.draw.rect(self.screen, ghost_color, rect, 1, border_radius=5)
 
     def _draw_block(self, col: int, row: int, color):
         if row < 0:
@@ -821,46 +908,56 @@ class SharedArenaMatch:
         y = self.board_rect.y + row * self.cell_size
         rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
         inner_rect = rect.inflate(-2, -2)
-        shadow_rect = inner_rect.move(0, 2)
+        shadow_rect = inner_rect.move(0, 3)
         radius = max(4, self.cell_size // 5)
-        dark_color = self._shade(color, 0.40)
-        light_color = self._tint(color, 0.28)
+        dark_color = self._shade(color, 0.45)
+        mid_color = self._shade(color, 0.22)
+        light_color = self._tint(color, 0.35)
+
+        # bottom shadow
         pygame.draw.rect(self.screen, dark_color, shadow_rect, border_radius=radius)
-        pygame.draw.rect(self.screen, color, inner_rect, border_radius=radius)
+        # mid-tone body
+        mid_rect = inner_rect.inflate(-1, -1)
+        pygame.draw.rect(self.screen, mid_color, mid_rect, border_radius=max(3, radius - 1))
+        # main fill
+        main_rect = inner_rect.inflate(-2, -2)
+        pygame.draw.rect(self.screen, color, main_rect, border_radius=max(3, radius - 2))
+        # top highlight
         highlight_rect = pygame.Rect(
-            inner_rect.x + 2,
-            inner_rect.y + 2,
-            max(4, inner_rect.width - 4),
+            main_rect.x + 2,
+            main_rect.y + 1,
+            max(4, main_rect.width - 4),
             max(4, self.cell_size // 3),
         )
-        pygame.draw.rect(self.screen, light_color, highlight_rect, border_radius=max(4, radius - 1))
-        pygame.draw.rect(self.screen, (255, 255, 255), inner_rect, 1, border_radius=radius)
+        pygame.draw.rect(self.screen, light_color, highlight_rect, border_radius=max(3, radius - 2))
+        # subtle inner border
+        pygame.draw.rect(self.screen, self._tint(color, 0.15), main_rect, 1, border_radius=max(3, radius - 2))
 
     def _draw_panel(self):
         panel_rect = pygame.Rect(self.board_rect.right + 20, self.board_rect.y, 250, self.board_height)
         self._draw_card(
             panel_rect,
-            (17, 23, 36),
-            (94, 124, 166),
-            glow_color=(108, 170, 255),
+            (252, 253, 255),
+            (175, 188, 210),
+            glow_color=(120, 160, 210),
             border_radius=10,
         )
 
-        header_surface = self.panel_header_font.render("共享竞技场", True, (128, 212, 255))
+        header_surface = self.panel_header_font.render("共享竞技场", True, (60, 70, 95))
         self.screen.blit(header_surface, (panel_rect.x + 20, panel_rect.y + 20))
 
         mins, secs = divmod(self.remaining_ms // 1000, 60)
         timer_card = pygame.Rect(panel_rect.x + 16, panel_rect.y + 50, panel_rect.width - 32, 84)
         self._draw_card(
             timer_card,
-            (12, 18, 30),
-            (84, 122, 178),
-            glow_color=(90, 166, 255),
+            (248, 250, 255),
+            (160, 178, 210),
+            glow_color=(100, 155, 220),
             border_radius=8,
         )
-        t_surf = self.base_font.render(f"{mins:02d}:{secs:02d}", True, (248, 250, 255))
+        t_surf = self.base_font.render(f"{mins:02d}:{secs:02d}", True, (25, 30, 48))
         t_rect = t_surf.get_rect(center=(timer_card.centerx, timer_card.centery + 4))
-        timer_label = self.panel_label_font.render("剩余时间", True, (174, 190, 218))
+        timer_label = self.panel_label_font.render("剩余时间", True, (130, 140, 165))
         self.screen.blit(timer_label, (timer_card.x + 18, timer_card.y + 12))
         self.screen.blit(t_surf, t_rect)
 
@@ -873,12 +970,12 @@ class SharedArenaMatch:
             card_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 64)
             self._draw_card(
                 card_rect,
-                (12, 18, 30),
-                (70, 98, 136),
+                (248, 250, 255),
+                (155, 172, 205),
                 border_radius=8,
             )
-            label_surf = self.panel_label_font.render(label, True, (160, 178, 206))
-            value_surf = self.panel_value_font.render(value, True, (234, 240, 248))
+            label_surf = self.panel_label_font.render(label, True, (120, 130, 155))
+            value_surf = self.panel_value_font.render(value, True, (35, 40, 60))
             self.screen.blit(label_surf, (card_rect.x + 16, card_rect.y + 11))
             self.screen.blit(value_surf, (card_rect.x + 16, card_rect.y + 33))
             y_offset += 76
@@ -887,38 +984,38 @@ class SharedArenaMatch:
             error_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 72)
             self._draw_card(
                 error_rect,
-                (42, 22, 24),
-                (174, 92, 84),
-                glow_color=(255, 126, 112),
+                (255, 240, 238),
+                (210, 120, 110),
+                glow_color=(255, 140, 130),
                 border_radius=8,
             )
             clipped = self._model_error[:20]
-            title_surf = self.panel_label_font.render("状态提示", True, (255, 192, 178))
-            error_surf = self.panel_value_font.render(clipped, True, (255, 226, 214))
+            title_surf = self.panel_label_font.render("状态提示", True, (180, 60, 50))
+            error_surf = self.panel_value_font.render(clipped, True, (140, 40, 35))
             self.screen.blit(title_surf, (error_rect.x + 16, error_rect.y + 12))
             self.screen.blit(error_surf, (error_rect.x + 16, error_rect.y + 38))
             y_offset += 84
 
         score_colors = {
-            "player": (82, 242, 214),
-            "ai1": (255, 116, 116),
-            "ai2": (255, 202, 112),
+            "player": (0, 190, 210),
+            "ai1": (235, 90, 80),
+            "ai2": (245, 185, 90),
         }
         for ent in self.entities:
-            accent = score_colors.get(ent.id, (180, 190, 210))
+            accent = score_colors.get(ent.id, (150, 160, 185))
             score_rect = pygame.Rect(panel_rect.x + 16, y_offset, panel_rect.width - 32, 76)
             self._draw_card(
                 score_rect,
-                (12, 18, 30),
-                self._tint(accent, 0.18),
+                (252, 253, 255),
+                self._shade(accent, 0.15),
                 glow_color=accent,
                 border_radius=8,
             )
             accent_bar = pygame.Rect(score_rect.x + 16, score_rect.y + 12, score_rect.width - 32, 4)
             pygame.draw.rect(self.screen, accent, accent_bar, border_radius=2)
-            name_surf = self.panel_label_font.render(ent.id.upper(), True, (172, 188, 214))
-            score_surf = self.panel_score_font.render(str(ent.score), True, (248, 250, 255))
-            unit_surf = self.panel_label_font.render("分", True, (172, 188, 214))
+            name_surf = self.panel_label_font.render(ent.id.upper(), True, (90, 100, 125))
+            score_surf = self.panel_score_font.render(str(ent.score), True, (25, 30, 48))
+            unit_surf = self.panel_label_font.render("分", True, (130, 140, 165))
             name_y = score_rect.y + 20
             score_y = score_rect.y + 40
             unit_x = score_rect.x + 16 + score_surf.get_width() + 10
@@ -930,28 +1027,35 @@ class SharedArenaMatch:
 
     def _draw_overlay(self, title: str, subtitle: str):
         overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((6, 10, 18, 182))
+        overlay.fill((220, 224, 236, 175))
         pygame.draw.circle(
             overlay,
-            (102, 176, 255, 28),
-            (self.screen.get_width() // 2, self.screen.get_height() // 2 - 40),
-            250,
+            (140, 180, 230, 22),
+            (self.screen.get_width() // 2, self.screen.get_height() // 2 - 60),
+            300,
         )
         self.screen.blit(overlay, (0, 0))
 
         sw, sh = self.screen.get_size()
-        card_rect = pygame.Rect(0, 0, 520, 184)
+        card_rect = pygame.Rect(0, 0, 660, 230)
         card_rect.center = (sw // 2, sh // 2)
         self._draw_card(
             card_rect,
-            (17, 23, 36),
-            (102, 140, 196),
-            glow_color=(104, 170, 255),
+            (252, 253, 255),
+            (150, 170, 205),
+            glow_color=(100, 155, 215),
             border_radius=10,
         )
-        accent_bar = pygame.Rect(card_rect.x + 26, card_rect.y + 18, card_rect.width - 52, 6)
-        pygame.draw.rect(self.screen, (118, 196, 255), accent_bar, border_radius=2)
-        t_surf = self.large_font.render(title, True, (255, 255, 255))
-        s_surf = self.base_font.render(subtitle, True, (200, 200, 200))
-        self.screen.blit(t_surf, (sw // 2 - t_surf.get_width() // 2, card_rect.y + 64))
-        self.screen.blit(s_surf, (sw // 2 - s_surf.get_width() // 2, card_rect.y + 116))
+        accent_bar = pygame.Rect(card_rect.x + 30, card_rect.y + 20, card_rect.width - 60, 6)
+        pygame.draw.rect(self.screen, (80, 165, 230), accent_bar, border_radius=2)
+
+        title_lines = title.split("\n")
+        title_y = card_rect.y + 48 if len(title_lines) == 1 else card_rect.y + 42
+        for line in title_lines:
+            t_surf = self.large_font.render(line, True, (25, 30, 48))
+            self.screen.blit(t_surf, (card_rect.centerx - t_surf.get_width() // 2, title_y))
+            title_y += t_surf.get_height() + 10
+
+        s_surf = self.base_font.render(subtitle, True, (110, 120, 145))
+        sub_y = card_rect.y + 156 if len(title_lines) == 1 else title_y + 8
+        self.screen.blit(s_surf, (card_rect.centerx - s_surf.get_width() // 2, sub_y))

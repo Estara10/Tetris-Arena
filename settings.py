@@ -103,7 +103,7 @@ class GameConfig:
     shared_arena_fall_speed_ms: int = 500
     shared_arena_control_tick_ms: int = 16
     shared_arena_ai_gravity_offset_ms: int = 90
-    shared_arena_duration_ms: int = 180000
+    shared_arena_duration_ms: int = 300000
     shared_arena_spawns: list[int] = field(default_factory=lambda: [9, 17, 25])
     shared_arena_player_cooldown_ms: int = 200
     shared_arena_ai_cooldown_ms: int = 300

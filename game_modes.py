@@ -56,7 +56,7 @@ AI_LEVELS = {
         ),
         action_interval_ms=500,
         mistake_chance=0.42,
-        fall_speed_ms=500,
+        fall_speed_ms=1000,
     ),
     "NORMAL": AILevel(
         key="NORMAL",
@@ -68,7 +68,7 @@ AI_LEVELS = {
         ),
         action_interval_ms=500,
         mistake_chance=0.18,
-        fall_speed_ms=500,
+        fall_speed_ms=667,
     ),
     "HARD": AILevel(
         key="HARD",

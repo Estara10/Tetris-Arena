@@ -52,6 +52,7 @@ class SharedGameCore:
         self.grid = []
         self.lines_cleared_total = 0
         self.event_log = []
+        self.last_cleared_rows: list[int] = []
 
         self.reset_game()
 
@@ -186,10 +187,12 @@ class SharedGameCore:
         self.spawn_piece(ent)
 
     def clear_lines(self, ent: ArenaEntity) -> int:
+        cleared_indices = [i for i, row in enumerate(self.grid) if 0 not in row]
         new_grid = [row for row in self.grid if 0 in row]
         lines_cleared = self.config.grid_rows - len(new_grid)
 
         if lines_cleared <= 0:
+            self.last_cleared_rows = []
             return 0
 
         for _ in range(lines_cleared):
@@ -201,7 +204,8 @@ class SharedGameCore:
 
         earned_score = self.score_mapping.get(lines_cleared, 0)
         ent.score += earned_score
-        
+
+        self.last_cleared_rows = cleared_indices
         return lines_cleared
 
     def check_game_over(self) -> bool:

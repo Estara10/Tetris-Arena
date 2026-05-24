@@ -261,7 +261,7 @@ class VersusMatch:
         if self.mode.key == "CLASSIC" and self.ai_level is not None:
             action_interval_ms = self.ai_level.action_interval_ms
             mistake_chance = self.ai_level.mistake_chance
-            classic_fall_speed = max(80, int(self.config.classic_fall_speed_ms))
+            classic_fall_speed = max(80, int(self.ai_level.fall_speed_ms))
             player_fall_speed = classic_fall_speed
             ai_fall_speed = classic_fall_speed
             if self.ai_controller.mode == "model":
