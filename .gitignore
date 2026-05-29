@@ -26,6 +26,8 @@ docx/
 
 # Generated content
 patent_report_rewrite.md
+generate_report.py
+generate_speech.py
 
 # IDE
 .vscode/

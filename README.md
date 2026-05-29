@@ -9,7 +9,7 @@
 ### 游戏机制
 
 - 经典 7 种方块（I/J/L/O/S/T/Z），7-bag 随机发牌
-- 方块移动、旋转、软降、硬降、Hold 暂存
+- 方块移动、旋转、硬降
 - 碰撞检测、锁定、消行、计分
 - 预测落点（Ghost Piece）、下一块预览
 - 垃圾行攻击与抵消系统
@@ -36,7 +36,7 @@
 ### Arena 同盘竞技规则
 
 - 玩家与 AI 在同一棋盘同时下落，活动方块之间不可穿透
-- 固定出生位：玩家 x=9，AI x=17
+- 固定出生位：玩家 x=9，AI1 x=17，AI2 x=25（共 3 个实体）
 - 双方重力相位错开，避免持续互挤
 - 紧挨碰撞：同向不变向，异向传导（对方已靠墙则不传导）
 - 得分：最后一格落地锁定者 +1 分
@@ -51,9 +51,11 @@
 | A | 左移 |
 | D | 右移 |
 | S | 直接落底 |
-| L | 变换 / Hold |
-| W | 暂停 |
-| C | 释放陷阱（对战模式，需满能量） |
+| L | 变换（旋转） |
+| W | Classic 中暂停，Arena 中硬降 |
+| C | 释放陷阱（Classic 模式，需满能量） |
+
+> **Arena 模式按键差异**：A / D 左右移动（支持长按），S 软降，W 硬降。
 
 ### 全局操作
 
@@ -116,7 +118,7 @@ pip install torch
 export TETRIS_RL_WARMUP=200
 export TETRIS_RL_EVAL_EPISODES=20
 export TETRIS_RL_CURRIC_EPISODES=160
-python3 scripts/rl_trainer.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
+python3 scripts/train.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
 ```
 
 关键评估指标：
@@ -178,9 +180,7 @@ Tetris_Python/
 │   ├── train_nextstate.py       #   Next-state 训练
 │   ├── evaluate_model.py        #   模型评估
 │   ├── test_load.py             #   模型加载测试
-│   ├── test_shared_load.py      #   Arena 导入测试
-│   ├── generate_report.py       #   课程报告生成
-│   └── generate_speech.py       #   发言稿生成
+│   └── test_shared_load.py      #   Arena 导入测试
 │
 └── models/                      # 预训练模型（DQN 权重）
 ```
