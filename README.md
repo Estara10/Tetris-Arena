@@ -1,176 +1,107 @@
-# Tetris Python AI Versus
+# Tetris Python — AI 对战平台
 
-基于 Pygame 的俄罗斯方块对战项目，当前版本已支持：
-- 同步 7-bag 发牌的人机对战
-- 垃圾行攻击与抵消
-- 陷阱能量与洞位限制机制
-- AI 双模式（启发式基线 / 模型推理）
-- 为强化学习训练准备的参数集中管理
+基于 Pygame 的俄罗斯方块 AI 对战项目，支持人机对战、同盘竞技，以及强化学习训练。
 
-## 当前功能
+## 功能概览
 
-- 经典 7 种方块（I/J/L/O/S/T/Z）
-- 方块移动、旋转、软降、硬降
+### 游戏机制
+
+- 经典 7 种方块（I/J/L/O/S/T/Z），7-bag 随机发牌
+- 方块移动、旋转、软降、硬降、Hold 暂存
 - 碰撞检测、锁定、消行、计分
-- 预测落点（Ghost Piece）
-- 下一块预览
-- 左右双棋盘对战（玩家 vs AI）
-- Classic / Challenge 模式
-- Arena 同盘竞技模式（玩家和 AI 在同一棋盘）
-- AI 启发式一层前瞻
-- 可选模型推理模式（如果检测到模型和 torch）
+- 预测落点（Ghost Piece）、下一块预览
+- 垃圾行攻击与抵消系统
+- 陷阱能量机制（消行充能 → 按 C 释放，限制对手洞位分布）
+- Combo 连击与 Back-to-Back (B2B) 奖励
 
-## 对战规则（本版）
+### 视觉效果（新增）
 
-说明：若按统一规则进行对战，请使用 Arena 模式（按 3 进入），该模式采用 25x25 与统一按键映射，并支持高频可调节节奏。
+- **粒子爆发**：消行时彩色粒子向四周飞溅，带重力加速度和透明度衰减
+- **屏幕震动**：消行时屏幕轻微抖动，强度与消行数成正比
+- **浮动文字**：消行、Combo、B2B、Tetris 时弹出飞字提示
+- **锁定闪光**：方块落定瞬间在落点产生短暂白色闪光
+- **菜单过渡动画**：菜单切换时 500ms 三次方缓出淡入效果
+- **计时器脉冲**：Arena 模式最后 30 秒计时器红色脉冲闪烁
+- **陷阱能量条**：Unicode 进度条直观显示陷阱能量状态
 
-### 1) 同步公平
+## 游戏模式
 
-- 玩家和 AI 使用同步 7-bag 序列
-- 双方同一基础重力规则
+| 按键 | 模式 | 说明 |
+|------|------|------|
+| 1 | Classic | 经典人机对战（左右双棋盘） |
+| 2 | Challenge | 挑战模式 |
+| 3 | Arena | 同盘竞技（玩家与 AI 在同一 33×25 棋盘同时下落） |
 
-### 2) 攻击与抵消
+### Arena 同盘竞技规则
 
-- 消行会按规则转换成攻击行
-- 攻击先抵消自己待接收的来袭垃圾，再把剩余攻击发送给对手
-- 未消行锁定时会结算来袭垃圾（每次有上限）
-
-默认攻击表在配置中：
-- 1 行: 0
-- 2 行: 1
-- 3 行: 2
-- 4 行: 4
-
-### 3) 陷阱机制
-
-- 通过消行累积陷阱能量
-- 玩家按 C 主动释放陷阱（有能量消耗与冷却）
-- 陷阱会限制后续攻击垃圾的洞位分布（左/中/右段）
-- 双方有预警提示文本
-
-### 4) 同盘竞技（Arena）
-
-- 玩家与 AI 在同一棋盘同时下落
-- 活动方块之间会发生碰撞阻挡（不允许互相穿透）
-- 棋盘固定为 25x25
-- 高频推进，默认约 0.18 秒下落 1 格，控制周期约 0.016 秒
-- AI 与玩家采用重力相位错开，减少同高同拍导致的持续互挤
-- 出生位固定：玩家 x=9，AI x=17
-- 计分规则：谁完成“最后一格落地锁定”谁得 1 分
-- 规定时间结束后，得分高者获胜
-- 紧挨碰撞规则：同向时双方不变向；异向时左右传导给对方（若对方已靠墙则不传导）
+- 玩家与 AI 在同一棋盘同时下落，活动方块之间不可穿透
+- 固定出生位：玩家 x=9，AI x=17
+- 双方重力相位错开，避免持续互挤
+- 紧挨碰撞：同向不变向，异向传导（对方已靠墙则不传导）
+- 得分：最后一格落地锁定者 +1 分
+- 规定时间结束后得分高者获胜
 
 ## 控制说明
 
-### 玩家操作（统一）
+### 玩家操作
 
-- A: 左移
-- D: 右移
-- S: 直接到底
-- L: 变换
-- W: 暂停
+| 按键 | 功能 |
+|------|------|
+| A | 左移 |
+| D | 右移 |
+| S | 直接落底 |
+| L | 变换 / Hold |
+| W | 暂停 |
+| C | 释放陷阱（对战模式，需满能量） |
 
 ### 全局操作
 
-- P: 暂停 / 恢复（兼容）
-- R: 重开当前对局
-- M: 返回菜单
-- Q / Esc: 退出
+| 按键 | 功能 |
+|------|------|
+| P | 暂停 / 恢复 |
+| R | 重开当前对局 |
+| M | 返回菜单 |
+| Q / Esc | 退出 |
 
 ## 运行方式
 
-安装依赖：
+### 环境要求
+
+- Python 3.10+
+- pygame
+
+### 安装运行
 
 ```bash
+# 安装依赖
 pip install pygame
-```
 
-运行：
-
-```bash
+# 运行游戏
 python3 main.py
 ```
 
-## AI 双模式
+### 可选：AI 模型推理模式
+
+```bash
+pip install torch
+export TETRIS_AI_MODE=model
+export TETRIS_AI_MODEL_PATH=models/next_state_v3/latest_checkpoint.pth
+python3 main.py
+```
+
+若 torch 未安装或模型文件不存在，会自动回退到启发式 AI 模式。
+
+## AI 系统
 
 ### 启发式模式（默认）
 
-- 不依赖 torch
-- 使用落点评分 + next_piece 一层前瞻
+不依赖 torch，使用落点评分 + next_piece 一层前瞻搜索。
 
 ### 模型推理模式
 
-通过环境变量启用：
+通过环境变量启用，加载训练好的 DQN 模型进行推理。支持 `cpu` / `cuda` 设备。
 
-```bash
-export TETRIS_AI_MODE=model
-export TETRIS_AI_MODEL_PATH=models/tetris_dqn.pt
-python3 main.py
-```
-
-说明：
-- 若未安装 torch，或模型文件不存在/加载失败，会自动回退到启发式模式。
-
-## 模式选择
-
-- 按 1 进入 Classic
-- 按 2 进入 Challenge
-- 按 3 进入 Arena（同盘竞技）
-
-## 配置中心
-
-所有主要参数集中在 settings.py 的 GameConfig：
-
-- 对战参数：
-  - versus_attack_mapping
-  - versus_combo_bonus
-  - versus_b2b_bonus
-  - versus_garbage_cap_per_lock
-  - versus_garbage_apply_on_nonclear
-  - versus_trap_energy_cost
-  - versus_trap_cooldown_ms
-  - versus_trap_forced_lines
-- AI 参数：
-  - ai_controller_mode
-  - ai_model_path
-  - ai_model_device
-  - ai_model_action_interval_ms
-  - ai_model_reaction_delay_ms
-- RL 训练参数：
-  - rl_enabled
-  - rl_gamma
-  - rl_batch_size
-  - rl_replay_capacity
-  - rl_target_sync_interval
-  - rl_learning_rate
-  - rl_epsilon_start / rl_epsilon_end / rl_epsilon_decay_steps
-
-## 强化学习接入说明（当前阶段）
-
-本仓库已先完成规则侧改造与参数收口，训练侧建议按下列模块推进：
-
-- tetris_env.py: reset/step 封装（已提供）
-- dqn_model.py: Q 网络定义（已提供）
-- replay_memory.py: 经验回放（已提供）
-- rl_trainer.py: 训练与评估循环（已提供）
-
-当前环境接口示例：
-
-```python
-from tetris_env import TetrisEnv
-
-env = TetrisEnv(step_dt_ms=90)
-state = env.reset(seed=42)
-
-done = False
-while not done:
-  action = env.sample_action()  # 后续可替换为模型动作
-  outcome = env.step(action)
-  state = outcome.state
-  done = outcome.done
-```
-
-训练命令示例：
+### 强化学习训练
 
 ```bash
 pip install torch
@@ -180,41 +111,87 @@ export TETRIS_RL_CURRIC_EPISODES=160
 python3 rl_trainer.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
 ```
 
-训练产物默认写入 models 目录：
-- last.pt
-- best.pt
-- training_history.json
+关键评估指标：
+- **Eval/AvgLines**：AI 平均每局消行数（最核心的能力指标）
+- **Eval/ClearRate**：至少消过行的对局比例
+- **Eval/AvgSteps**：平均存活步数
+- **Train/Loss**：网络训练损失
 
-建议评估指标：
-- 平均存活步数
-- 平均消行数
-- 平均承受垃圾行数
-- 固定种子集上的胜率
+训练产物默认输出到 `models/` 目录。
 
-## 目录概览
+## 项目结构
 
-```text
-Tetris_Python/
-├── app_controller.py
-├── main.py
-├── settings.py
-├── game_core.py
-├── shared_game_core.py
-├── versus_match.py
-├── ai_controller.py
-├── tetris_env.py
-├── dqn_model.py
-├── replay_memory.py
-├── rl_trainer.py
-├── piece_sequence.py
-├── tetromino.py
-├── render.py
-├── background.py
-├── menu_screens.py
-├── game_modes.py
-└── player_input.py
 ```
+Tetris_Python/
+├── main.py                      # 程序入口
+├── app_controller.py            # 应用控制器（菜单/对局调度）
+├── settings.py                  # 全局配置中心（GameConfig）
+├── game_core.py                 # 核心游戏逻辑（网格、消行、锁定）
+├── shared_game_core.py          # Arena 同盘核心逻辑
+├── tetromino.py                 # 方块定义与旋转
+├── piece_sequence.py            # 7-bag 发牌序列
+├── player_input.py              # 玩家输入处理
+├── game_modes.py                # 模式定义
+│
+├── versus_match.py              # 人机对战（双棋盘）
+├── shared_arena_match.py        # Arena 同盘竞技
+│
+├── ai_controller.py             # AI 控制器（启发式 + 模型）
+├── deep_q_network.py            # DQN 算法实现
+├── dqn_model.py                 # Q 网络模型定义
+├── next_state_features.py       # Next-state 特征提取
+├── tetris_env.py                # 强化学习环境（gym 风格）
+├── shared_tetris_env.py         # Arena RL 环境
+├── shared_arena_model.py        # Arena AI 模型
+├── replay_memory.py             # 经验回放
+├── rl_trainer.py                # RL 训练与评估循环
+├── model_paths.py               # 模型路径管理
+│
+├── render.py                    # 渲染引擎
+├── effects.py                   # 视觉特效（粒子、震动、飞字、闪光）
+├── ui_primitives.py             # 共享 UI 绘制原语
+├── ui_fonts.py                  # 字体管理
+├── menu_screens.py              # 菜单界面
+├── background.py                # 动态背景
+│
+├── train.py                     # 训练入口
+├── train_board.py               # 棋盘训练
+├── train_nextstate.py           # Next-state 模型训练
+├── evaluate_model.py            # 模型评估
+├── test_load.py                 # 模型加载测试
+├── test_shared_load.py          # Arena 导入测试
+│
+├── generate_report.py           # 课程报告生成
+├── generate_speech.py           # 发言稿生成
+│
+├── background.png               # 背景图资源
+└── models/                      # 模型产物（不纳入版本控制）
+```
+
+## 配置
+
+所有可调参数集中在 `settings.py` 的 `GameConfig` 中，支持环境变量覆盖：
+
+| 环境变量 | 说明 | 默认值 |
+|----------|------|--------|
+| `TETRIS_AI_MODE` | AI 模式 (heuristic/model) | heuristic |
+| `TETRIS_AI_MODEL_PATH` | 模型路径 | models/next_state_v3/best.pt |
+| `TETRIS_AI_DEVICE` | 推理设备 | cpu |
+| `TETRIS_ARENA_FALL_MS` | Arena 下落速度 | 500 |
+| `TETRIS_AREA_SCALE` | 单元格缩放 | 1.6 |
+| `TETRIS_FPS` | 帧率 | 60 |
+| `TETRIS_RL_ENABLED` | 启用 RL 训练 | false |
+| `TETRIS_RL_EPISODES` | 训练回合数 | 300 |
+
+对战参数（攻击表、Combo 奖励、陷阱消耗/冷却等）参见 `settings.py` 中的 `GameConfig`。
+
+## 对战规则
+
+1. **同步公平**：玩家与 AI 使用同步 7-bag 序列，相同基础重力
+2. **攻击与抵消**：消行攻击先抵消待接收垃圾行，余量发送给对手
+3. **攻击表**：1 行→0 / 2 行→1 / 3 行→2 / 4 行→4（可配置）
+4. **陷阱机制**：消行充能 → 按 C 释放 → 限制对手垃圾行洞位分布
 
 ## License
 
-仅用于学习与练习，可按需继续扩展。
+仅用于学习与练习，可按需扩展。
