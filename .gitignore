@@ -13,13 +13,12 @@ build/
 venv/
 env/
 
-# Model checkpoints (large binary files)
-models/
-*.pth
-*.pt
-
-# TensorBoard logs
+# Training artifacts (keep model checkpoints)
+models/**/tensorboard/
+models/**/training_summary.json
+models/**/training_curve.png
 tensorboard/
+*history.json
 
 # Generated documents
 *.docx
@@ -27,11 +26,6 @@ docx/
 
 # Generated content
 patent_report_rewrite.md
-training_summary.json
-training_curve.png
-
-# Training artifacts
-*history.json
 
 # IDE
 .vscode/

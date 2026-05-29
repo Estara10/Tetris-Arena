@@ -82,24 +82,31 @@ python3 main.py
 
 ### 可选：AI 模型推理模式
 
+仓库已包含预训练模型（`models/` 目录），安装 torch 后即可使用：
+
 ```bash
 pip install torch
 export TETRIS_AI_MODE=model
-export TETRIS_AI_MODEL_PATH=models/next_state_v3/latest_checkpoint.pth
 python3 main.py
 ```
 
-若 torch 未安装或模型文件不存在，会自动回退到启发式 AI 模式。
+默认加载 `models/next_state_v3/latest_checkpoint.pth`，也可通过环境变量指定：
+
+```bash
+export TETRIS_AI_MODEL_PATH=models/next_state_v3/best.pt
+```
+
+若 torch 未安装，会自动回退到启发式 AI 模式，不影响游戏运行。
 
 ## AI 系统
 
 ### 启发式模式（默认）
 
-不依赖 torch，使用落点评分 + next_piece 一层前瞻搜索。
+不依赖 torch，使用落点评分 + next_piece 一层前瞻搜索。无需任何模型文件。
 
 ### 模型推理模式
 
-通过环境变量启用，加载训练好的 DQN 模型进行推理。支持 `cpu` / `cuda` 设备。
+加载训练好的 DQN 模型进行推理。支持 `cpu` / `cuda` 设备。预训练模型已包含在仓库中（`models/next_state*/`）。
 
 ### 强化学习训练
 
