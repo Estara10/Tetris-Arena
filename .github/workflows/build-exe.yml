@@ -1,0 +1,45 @@
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+    # Manual trigger from GitHub Actions tab
+  push:
+    tags:
+      - "v*"          # Auto-build on version tags (e.g. v1.0, v2.3)
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build exe with PyInstaller
+        run: |
+          pyinstaller tetris.spec
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tetris_AI_Windows
+          path: dist/Tetris_AI.exe
+          retention-days: 30
+
+      - name: Create Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Tetris_AI.exe
+          generate_release_notes: true
