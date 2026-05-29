@@ -5,7 +5,7 @@ except Exception:  # pragma: no cover
     torch = None
     nn = None
 
-from deep_q_network import DeepQNetwork
+from src.ai.deep_q_network import DeepQNetwork
 
 
 def _normalize_state_dict_payload(payload):

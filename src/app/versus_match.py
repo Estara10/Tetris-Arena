@@ -3,17 +3,17 @@ from pathlib import Path
 
 import pygame
 
-from ai_controller import AIController
-from background import Background
-from effects import VisualEffects
-from game_core import GameCore
-from game_modes import AILevel, MatchMode
-from piece_sequence import SharedShapeSequence
-from player_input import PlayerInputController
-from render import Render
+from src.ai.ai_controller import AIController
+from src.render.background import Background
+from src.render.effects import VisualEffects
+from src.game.game_core import GameCore
+from src.game.game_modes import AILevel, MatchMode
+from src.game.piece_sequence import SharedShapeSequence
+from src.game.player_input import PlayerInputController
+from src.render.render import Render
 from settings import GameConfig
-from ui_fonts import build_ui_font
-from ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color
+from src.render.ui_fonts import build_ui_font
+from src.render.ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color
 
 
 class VersusMatch:
@@ -69,7 +69,7 @@ class VersusMatch:
 
         configured_model_path = Path(self.config.ai_model_path)
         if not configured_model_path.is_absolute():
-            configured_model_path = Path(__file__).resolve().parent / configured_model_path
+            configured_model_path = Path(__file__).resolve().parent.parent.parent / configured_model_path
 
         # 经典模式采用轻量启发式控制，避免模型分支回退导致主线程卡顿。
         controller_mode = "heuristic" if self.mode.key == "CLASSIC" else "model"

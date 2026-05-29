@@ -5,8 +5,8 @@ import torch.nn as nn
 from collections import deque
 from copy import deepcopy
 
-from tetris_env import TetrisEnv
-from deep_q_network import DeepQNetwork
+from src.ai.tetris_env import TetrisEnv
+from src.ai.deep_q_network import DeepQNetwork
 
 def train(episodes=2000, batch_size=512, gamma=0.99, epsilon_start=1.0, epsilon_end=0.001, epsilon_decay=2000):
     env = TetrisEnv(mode="TRADITIONAL")

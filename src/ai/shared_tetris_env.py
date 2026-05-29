@@ -2,11 +2,11 @@ from dataclasses import dataclass
 import random
 import pygame
 
-from ai_controller import board_profile
-from game_modes import GAME_MODES
+from src.ai.ai_controller import board_profile
+from src.game.game_modes import GAME_MODES
 from settings import CONFIG, GameConfig
-from shared_arena_match import SharedArenaMatch
-from shared_arena_model import (
+from src.app.shared_arena_match import SharedArenaMatch
+from src.ai.shared_arena_model import (
     ACTION_HARD_DROP,
     ACTION_LEFT,
     ACTION_MEANING,

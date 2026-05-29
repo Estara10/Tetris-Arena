@@ -29,12 +29,12 @@ except Exception:  # pragma: no cover
     except Exception:  # pragma: no cover
         SummaryWriter = None
 
-from ai_controller import board_profile, evaluate_grid, generate_candidates
-from deep_q_network import DeepQNetwork
-from model_paths import mode_model_dir
+from src.ai.ai_controller import board_profile, evaluate_grid, generate_candidates
+from src.ai.deep_q_network import DeepQNetwork
+from src.ai.model_paths import mode_model_dir
 from settings import CONFIG
-from shared_tetris_env import SharedTetrisEnv
-from tetris_env import TetrisEnv
+from src.ai.shared_tetris_env import SharedTetrisEnv
+from src.ai.tetris_env import TetrisEnv
 
 
 CHECKPOINT_NAME = "latest_checkpoint.pth"

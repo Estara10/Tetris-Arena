@@ -3,12 +3,12 @@ from dataclasses import replace
 
 import pygame
 
-from game_modes import AI_LEVELS, GAME_MODES, MENU_CLASSIC_LEVEL, MENU_MODE_SELECT
-from menu_screens import draw_classic_level_menu, draw_mode_select_menu
-from shared_arena_match import SharedArenaMatch
+from src.game.game_modes import AI_LEVELS, GAME_MODES, MENU_CLASSIC_LEVEL, MENU_MODE_SELECT
+from src.render.menu_screens import draw_classic_level_menu, draw_mode_select_menu
+from src.app.shared_arena_match import SharedArenaMatch
 from settings import CONFIG, GameConfig
-from ui_fonts import build_menu_fonts
-from versus_match import VersusMatch
+from src.render.ui_fonts import build_menu_fonts
+from src.app.versus_match import VersusMatch
 
 
 def build_match_config(base_config: GameConfig) -> GameConfig:

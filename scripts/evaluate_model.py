@@ -9,8 +9,8 @@ try:
 except Exception:  # pragma: no cover
     torch = None
 
-from model_paths import resolve_existing_model_path
-from rl_trainer import DQNTrainer
+from src.ai.model_paths import resolve_existing_model_path
+from src.ai.rl_trainer import DQNTrainer
 from settings import CONFIG
 
 

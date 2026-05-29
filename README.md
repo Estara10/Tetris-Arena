@@ -117,7 +117,7 @@ pip install torch
 export TETRIS_RL_WARMUP=200
 export TETRIS_RL_EVAL_EPISODES=20
 export TETRIS_RL_CURRIC_EPISODES=160
-python3 rl_trainer.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
+python3 scripts/rl_trainer.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
 ```
 
 关键评估指标：
@@ -133,48 +133,57 @@ python3 rl_trainer.py --episodes 300 --seed 42 --opponent-mode heuristic --devic
 ```
 Tetris_Python/
 ├── main.py                      # 程序入口
-├── app_controller.py            # 应用控制器（菜单/对局调度）
 ├── settings.py                  # 全局配置中心（GameConfig）
-├── game_core.py                 # 核心游戏逻辑（网格、消行、锁定）
-├── shared_game_core.py          # Arena 同盘核心逻辑
-├── tetromino.py                 # 方块定义与旋转
-├── piece_sequence.py            # 7-bag 发牌序列
-├── player_input.py              # 玩家输入处理
-├── game_modes.py                # 模式定义
-│
-├── versus_match.py              # 人机对战（双棋盘）
-├── shared_arena_match.py        # Arena 同盘竞技
-│
-├── ai_controller.py             # AI 控制器（启发式 + 模型）
-├── deep_q_network.py            # DQN 算法实现
-├── dqn_model.py                 # Q 网络模型定义
-├── next_state_features.py       # Next-state 特征提取
-├── tetris_env.py                # 强化学习环境（gym 风格）
-├── shared_tetris_env.py         # Arena RL 环境
-├── shared_arena_model.py        # Arena AI 模型
-├── replay_memory.py             # 经验回放
-├── rl_trainer.py                # RL 训练与评估循环
-├── model_paths.py               # 模型路径管理
-│
-├── render.py                    # 渲染引擎
-├── effects.py                   # 视觉特效（粒子、震动、飞字、闪光）
-├── ui_primitives.py             # 共享 UI 绘制原语
-├── ui_fonts.py                  # 字体管理
-├── menu_screens.py              # 菜单界面
-├── background.py                # 动态背景
-│
-├── train.py                     # 训练入口
-├── train_board.py               # 棋盘训练
-├── train_nextstate.py           # Next-state 模型训练
-├── evaluate_model.py            # 模型评估
-├── test_load.py                 # 模型加载测试
-├── test_shared_load.py          # Arena 导入测试
-│
-├── generate_report.py           # 课程报告生成
-├── generate_speech.py           # 发言稿生成
-│
+├── requirements.txt             # 运行时依赖
+├── tetris.spec                  # PyInstaller 打包配置
 ├── background.png               # 背景图资源
-└── models/                      # 模型产物（不纳入版本控制）
+├── 演示视频.mp4                  # 项目演示视频
+│
+├── src/
+│   ├── game/                    # 核心游戏逻辑
+│   │   ├── tetromino.py         #   方块定义与旋转
+│   │   ├── piece_sequence.py    #   7-bag 发牌序列
+│   │   ├── game_core.py         #   对战核心逻辑
+│   │   ├── shared_game_core.py  #   Arena 同盘逻辑
+│   │   ├── player_input.py      #   玩家输入处理
+│   │   └── game_modes.py        #   模式/难度定义
+│   │
+│   ├── render/                  # 渲染 & 视觉效果
+│   │   ├── render.py            #   棋盘渲染引擎
+│   │   ├── background.py        #   动态背景
+│   │   ├── menu_screens.py      #   菜单界面
+│   │   ├── ui_fonts.py          #   字体管理
+│   │   ├── ui_primitives.py     #   共享绘制原语
+│   │   └── effects.py           #   视觉特效
+│   │
+│   ├── ai/                      # AI & 强化学习
+│   │   ├── ai_controller.py     #   AI 控制器（启发式 + 模型）
+│   │   ├── dqn_model.py         #   DQN 模型加载
+│   │   ├── deep_q_network.py    #   神经网络定义
+│   │   ├── next_state_features.py  # 特征提取
+│   │   ├── replay_memory.py     #   经验回放
+│   │   ├── rl_trainer.py        #   RL 训练器
+│   │   ├── tetris_env.py        #   RL 环境（对战）
+│   │   ├── shared_tetris_env.py #   RL 环境（Arena）
+│   │   ├── shared_arena_model.py   # Arena AI 模型
+│   │   └── model_paths.py       #   模型路径工具
+│   │
+│   └── app/                     # 应用层
+│       ├── app_controller.py    #   主控制器
+│       ├── versus_match.py      #   人机对战会话
+│       └── shared_arena_match.py   # Arena 对战会话
+│
+├── scripts/                     # 独立脚本
+│   ├── train.py                 #   训练入口
+│   ├── train_board.py           #   棋盘训练
+│   ├── train_nextstate.py       #   Next-state 训练
+│   ├── evaluate_model.py        #   模型评估
+│   ├── test_load.py             #   模型加载测试
+│   ├── test_shared_load.py      #   Arena 导入测试
+│   ├── generate_report.py       #   课程报告生成
+│   └── generate_speech.py       #   发言稿生成
+│
+└── models/                      # 预训练模型（DQN 权重）
 ```
 
 ## 配置

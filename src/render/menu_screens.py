@@ -1,8 +1,8 @@
 import pygame
 
-from game_modes import AI_LEVELS, AI_LEVEL_ORDER, GAME_MODES
+from src.game.game_modes import AI_LEVELS, AI_LEVEL_ORDER, GAME_MODES
 from settings import GameConfig
-from ui_primitives import draw_soft_glow, lerp_color
+from src.render.ui_primitives import draw_soft_glow, lerp_color
 
 
 MODE_META = {

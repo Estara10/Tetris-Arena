@@ -1,6 +1,6 @@
 import pygame
 
-from game_core import GameCore
+from src.game.game_core import GameCore
 
 
 def move_horizontal(game_core: GameCore, direction: int) -> bool:

@@ -3,7 +3,7 @@ import random
 from dataclasses import dataclass, field
 
 from settings import CONFIG, GameConfig
-from tetromino import Tetromino
+from src.game.tetromino import Tetromino
 
 
 @dataclass

@@ -1,7 +1,7 @@
 import os
-from dqn_model import load_inference_model
+from src.ai.dqn_model import load_inference_model
 
-model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models/next_state/best.pt")
+model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models/next_state/best.pt")
 print(f"Loading from: {model_path}")
 print(f"Exists: {os.path.exists(model_path)}")
 try:

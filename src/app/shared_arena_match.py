@@ -5,16 +5,16 @@ import random
 
 import pygame
 
-from ai_controller import generate_candidates
-from dqn_model import load_inference_model
-from effects import VisualEffects
-from game_modes import MatchMode
-from next_state_features import NEXT_STATE_AUX_FEATURE_COUNT, extract_next_state_features
-from piece_sequence import SharedShapeSequence
+from src.ai.ai_controller import generate_candidates
+from src.ai.dqn_model import load_inference_model
+from src.render.effects import VisualEffects
+from src.game.game_modes import MatchMode
+from src.ai.next_state_features import NEXT_STATE_AUX_FEATURE_COUNT, extract_next_state_features
+from src.game.piece_sequence import SharedShapeSequence
 from settings import GameConfig
-from shared_game_core import SharedGameCore, ArenaEntity
-from ui_fonts import build_ui_font
-from ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color, shade, tint
+from src.game.shared_game_core import SharedGameCore, ArenaEntity
+from src.render.ui_fonts import build_ui_font
+from src.render.ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color, shade, tint
 
 try:
     import torch
@@ -112,7 +112,7 @@ class SharedArenaMatch:
         self._model_rerank_scale = 35.0
         configured_model_path = Path(self.config.ai_model_path)
         if not configured_model_path.is_absolute():
-            configured_model_path = Path(__file__).resolve().parent / configured_model_path
+            configured_model_path = Path(__file__).resolve().parent.parent.parent / configured_model_path
         self._model_path = configured_model_path
 
         # Limits and Timers

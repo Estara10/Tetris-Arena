@@ -1,8 +1,8 @@
 import pygame
 
 from settings import CONFIG, GameConfig
-from ui_fonts import build_ui_font
-from ui_primitives import draw_card, draw_soft_glow, shade, tint
+from src.render.ui_fonts import build_ui_font
+from src.render.ui_primitives import draw_card, draw_soft_glow, shade, tint
 
 
 class Render:

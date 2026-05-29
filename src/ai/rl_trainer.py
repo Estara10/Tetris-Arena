@@ -16,10 +16,10 @@ except Exception:  # pragma: no cover
     torch = None
     nn = None
 
-from model_paths import mode_model_dir
-from replay_memory import ReplayMemory
+from src.ai.model_paths import mode_model_dir
+from src.ai.replay_memory import ReplayMemory
 from settings import CONFIG, GameConfig
-from tetris_env import TetrisEnv
+from src.ai.tetris_env import TetrisEnv
 
 
 LATEST_CHECKPOINT_NAME = "latest_checkpoint.pth"
@@ -416,7 +416,7 @@ class DQNTrainer:
         self.device = self._resolve_device(self.config.device)
 
         if self.config.game_mode == "TRADITIONAL":
-            from shared_tetris_env import SharedTetrisEnv
+            from src.ai.shared_tetris_env import SharedTetrisEnv
             self.env = SharedTetrisEnv(
                 config=self.game_config,
                 mode_key=self.config.game_mode,

@@ -43,7 +43,7 @@ def resolve_existing_model_path(
     filename: str | None = None,
 ) -> Path:
     import os
-    base_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), base_dir)))
+    base_dir = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", base_dir)))
     """
     解析可用模型路径：
     - 指定 filename 时按该文件查找；

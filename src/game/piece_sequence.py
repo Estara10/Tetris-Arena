@@ -1,7 +1,7 @@
 import random
 
 from settings import CONFIG, GameConfig
-from tetromino import SHAPES, Tetromino
+from src.game.tetromino import SHAPES, Tetromino
 
 
 class SevenBagShapeSource:

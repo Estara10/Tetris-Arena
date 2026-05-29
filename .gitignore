@@ -53,3 +53,5 @@ update_*.py
 
 # Temp files
 .~*
+*.zip
+*.jpg

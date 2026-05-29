@@ -22,10 +22,10 @@ except Exception:  # pragma: no cover
     except Exception:  # pragma: no cover
         SummaryWriter = None
 
-from deep_q_network import DeepQNetwork
-from next_state_features import next_state_feature_size
+from src.ai.deep_q_network import DeepQNetwork
+from src.ai.next_state_features import next_state_feature_size
 from settings import CONFIG
-from tetris_env import TetrisEnv
+from src.ai.tetris_env import TetrisEnv
 
 
 def parse_args():

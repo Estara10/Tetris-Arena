@@ -4,7 +4,7 @@ import random
 import pygame
 
 from settings import CONFIG, GameConfig
-from tetromino import Tetromino
+from src.game.tetromino import Tetromino
 
 
 class GameCore:

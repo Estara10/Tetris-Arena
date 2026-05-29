@@ -3,10 +3,10 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from next_state_features import analyze_board, extract_next_state_features
-from ai_controller import AIController, board_profile
-from game_core import GameCore
-from piece_sequence import SharedShapeSequence
+from src.ai.next_state_features import analyze_board, extract_next_state_features
+from src.ai.ai_controller import AIController, board_profile
+from src.game.game_core import GameCore
+from src.game.piece_sequence import SharedShapeSequence
 from settings import CONFIG, GameConfig
 
 
@@ -603,7 +603,7 @@ class TetrisEnv:
         return states
 
     def get_next_state_candidates(self) -> list[dict]:
-        from ai_controller import generate_candidates
+        from src.ai.ai_controller import generate_candidates
 
         piece = self.player_core.current_piece
         if not piece:

@@ -1,9 +1,9 @@
 import random
 
-from dqn_model import load_inference_model
-from next_state_features import analyze_board, extract_next_state_features
+from src.ai.dqn_model import load_inference_model
+from src.ai.next_state_features import analyze_board, extract_next_state_features
 from settings import CONFIG, GameConfig
-from tetromino import Tetromino
+from src.game.tetromino import Tetromino
 
 try:
     import torch
