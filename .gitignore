@@ -45,6 +45,7 @@ training_curve.png
 Thumbs.db
 
 # Claude Code internal
+.claude/
 .codex
 AGENTS.md
 
