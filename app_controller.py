@@ -63,6 +63,7 @@ class TetrisApp:
         self.current_match = None
         self.current_mode = None
         self.current_ai_level = None
+        self._menu_entry_ms = pygame.time.get_ticks()
 
     def run(self):
         """游戏的主循环。处理事件、更新逻辑并负责绘制画面。"""
@@ -121,6 +122,7 @@ class TetrisApp:
                 self.current_mode = GAME_MODES["CLASSIC"]
                 self.current_ai_level = None
                 self.menu_state = MENU_CLASSIC_LEVEL
+                self._menu_entry_ms = pygame.time.get_ticks()
             elif key in (pygame.K_2, pygame.K_KP2):
                 self._start_match(GAME_MODES["TRADITIONAL"])
             return
@@ -130,6 +132,7 @@ class TetrisApp:
                 self.current_mode = None
                 self.current_ai_level = None
                 self.menu_state = MENU_MODE_SELECT
+                self._menu_entry_ms = pygame.time.get_ticks()
             elif key in (pygame.K_1, pygame.K_KP1):
                 self._start_match(self.current_mode, AI_LEVELS["EASY"])
             elif key in (pygame.K_2, pygame.K_KP2):
@@ -180,6 +183,7 @@ class TetrisApp:
         self.current_mode = None
         self.current_ai_level = None
         self.menu_state = MENU_MODE_SELECT
+        self._menu_entry_ms = pygame.time.get_ticks()
 
     def _get_menu_surface(self, menu_state: str):
         cached = self.menu_cache.get(menu_state)
@@ -198,7 +202,20 @@ class TetrisApp:
     def _render_frame(self, dt: int, pressed_keys):
         """核心渲染调用，根据状态决定绘制主菜单或是绘制当前的对抗比赛画面。"""
         if self.current_match is None:
-            self.screen.blit(self._get_menu_surface(self.menu_state), (0, 0))
+            menu_surface = self._get_menu_surface(self.menu_state)
+            now = pygame.time.get_ticks()
+            elapsed = now - self._menu_entry_ms
+            duration = 500
+            if elapsed < duration:
+                progress = elapsed / duration
+                eased = 1.0 - (1.0 - progress) ** 3
+                alpha = int(255 * eased)
+                temp = menu_surface.copy()
+                temp.set_alpha(alpha)
+                self.screen.fill((20, 20, 24))
+                self.screen.blit(temp, (0, 0))
+            else:
+                self.screen.blit(menu_surface, (0, 0))
             return
 
         self.current_match.update(dt, pressed_keys)

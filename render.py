@@ -2,6 +2,7 @@ import pygame
 
 from settings import CONFIG, GameConfig
 from ui_fonts import build_ui_font
+from ui_primitives import draw_card, draw_soft_glow, shade, tint
 
 
 class Render:
@@ -79,16 +80,10 @@ class Render:
         return surface
 
     def _tint(self, color, amount: float):
-        return tuple(
-            max(0, min(255, int(channel + (255 - channel) * amount)))
-            for channel in color
-        )
+        return tint(color, amount)
 
     def _shade(self, color, amount: float):
-        return tuple(
-            max(0, min(255, int(channel * (1.0 - amount))))
-            for channel in color
-        )
+        return shade(color, amount)
 
     def _fit_text(self, font, text: str, max_width: int) -> str:
         if font.size(text)[0] <= max_width:
@@ -107,42 +102,13 @@ class Render:
         return surface
 
     def _draw_soft_glow(self, rect, color, spread=16, alpha=32, border_radius=8):
-        glow_surface = pygame.Surface(
-            (rect.width + spread * 2, rect.height + spread * 2),
-            pygame.SRCALPHA,
-        )
-        glow_rect = pygame.Rect(spread, spread, rect.width, rect.height)
-        pygame.draw.rect(
-            glow_surface,
-            (color[0], color[1], color[2], alpha),
-            glow_rect,
-            border_radius=border_radius,
-        )
-        self.surface.blit(glow_surface, (rect.x - spread, rect.y - spread))
+        draw_soft_glow(self.surface, rect, color, spread, alpha, border_radius)
 
     def _draw_card(self, rect, fill_color, border_color, glow_color=None, border_radius=8):
-        shadow_surface = pygame.Surface((rect.width + 28, rect.height + 28), pygame.SRCALPHA)
-        pygame.draw.rect(
-            shadow_surface,
-            (0, 0, 0, 84),
-            pygame.Rect(14, 14, rect.width, rect.height),
-            border_radius=border_radius,
-        )
-        self.surface.blit(shadow_surface, (rect.x - 14, rect.y - 10))
-
-        if glow_color is not None:
-            self._draw_soft_glow(rect, glow_color, spread=14, alpha=34, border_radius=border_radius)
-
-        pygame.draw.rect(self.surface, fill_color, rect, border_radius=border_radius)
-        inner_rect = rect.inflate(-4, -4)
-        pygame.draw.rect(
-            self.surface,
-            (42, 56, 78),
-            inner_rect,
-            1,
-            border_radius=max(4, border_radius - 2),
-        )
-        pygame.draw.rect(self.surface, border_color, rect, 2, border_radius=border_radius)
+        draw_card(self.surface, rect, fill_color, border_color,
+                  glow_color=glow_color, border_radius=border_radius,
+                  shadow_offset=(14, 10), shadow_alpha=84,
+                  inner_border_color=(42, 56, 78))
 
     def _draw_stat_card(self, rect, label, value, accent_color):
         self._draw_card(
@@ -418,7 +384,7 @@ class Render:
         self._draw_stat_card(score_rect, "得分", score, accent_color)
         self._draw_stat_card(lines_rect, "消行", lines_cleared, self._tint(accent_color, 0.1))
 
-        info_card_rect = pygame.Rect(panel_x + 18, 198, self.side_panel_width - 36, 150)
+        info_card_rect = pygame.Rect(panel_x + 18, 198, self.side_panel_width - 36, 184)
         self._draw_card(
             info_card_rect,
             (17, 23, 36),
@@ -430,7 +396,7 @@ class Render:
         self.surface.blit(info_title, (info_card_rect.x + 16, info_card_rect.y + 14))
 
         info_y = info_card_rect.y + 46
-        for info in info_lines[:3]:
+        for info in info_lines[:4]:
             chip_h = self._draw_info_chip(
                 info_card_rect.x + 14,
                 info_y,

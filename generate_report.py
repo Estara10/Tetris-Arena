@@ -473,6 +473,42 @@ def add_patent_body(doc):
         "应当理解，以下实施例用于说明本系统的实现方式，并不表示本发明只能采用该一种具体实现。"
     )
 
+    # ---- 技术栈 ----
+    add_step_header(doc, "技术栈")
+
+    add_body_paragraph(doc,
+        "本实施例所涉及的主要技术组件如下：",
+        first_indent=True,
+    )
+    add_body_paragraph(doc,
+        "游戏引擎：Pygame（2D 渲染、事件处理、60 FPS 主循环调度）",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "AI 框架：PyTorch + Deep Q-Network（三层全连接 128/128/64，23 维特征输入）",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "训练策略：Prioritized Experience Replay + 课程学习 + Teacher Forcing",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "语言与数据：Python 3.10 + NumPy",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "通信机制：Pygame 事件系统（键盘输入非阻塞轮询，AI 决策帧同步调度）",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "存储：PyTorch .pt 模型文件",
+        first_indent=False,
+    )
+    add_body_paragraph(doc,
+        "工具链：VS Code + Git + python-docx",
+        first_indent=False,
+    )
+
     # 结合图1
     add_body_paragraph(doc,
         "结合图1（智能决策方法整体流程示意图），本发明提供了一种基于深度Q网络与自适应降级机制的"
@@ -528,6 +564,39 @@ def add_patent_body(doc):
         "同一UI视口下的平滑操作体验，成功构筑了流畅、智能且具有挑战性的人机博弈系统。"
     )
 
+    # 视觉反馈系统
+    add_step_header(doc, "视觉反馈增强")
+
+    add_body_paragraph(doc,
+        "为进一步提升人机交互的直观性和游戏体验的观赏性，本实施例还实现了一套轻量级视觉反馈系统，"
+        "包含以下四项独立效果模块，均封装于effects.py视觉特效模块中，"
+        "对游戏逻辑零侵入，仅依赖渲染层的事件触发接口。"
+    )
+    add_body_paragraph(doc,
+        "（1）消行粒子爆发与屏幕震动：当任意实体完成行消除时，系统沿消除行所在像素位置"
+        "向四周随机喷射30个彩色粒子（具备重力加速度与二次衰减透明度），"
+        "同时根据消除行数触发分级屏幕震动（1行2像素振幅，4行10像素振幅，衰减周期280-420毫秒），"
+        "强化消行操作的打击反馈感。"
+    )
+    add_body_paragraph(doc,
+        "（2）飞字提示：消除行时从消除位置向上飘出浮动文字（如「TETRIS!」「COMBO x3」「+400」），"
+        "含上升动画与透明度衰减，持续约1.4秒后自动消失，为玩家提供清晰的即时操作反馈。"
+    )
+    add_body_paragraph(doc,
+        "（3）方块锁定闪光：每次方块落底锁定（Lock）时，"
+        "在该方块所占据的所有单元格上叠加180毫秒白色高亮闪光并快速衰减，"
+        "使玩家能够准确感知方块固化的瞬间位置。"
+    )
+    add_body_paragraph(doc,
+        "（4）菜单淡入过渡：模式选择与AI等级选择界面在首次进入及切换时，"
+        "执行500毫秒缓入淡出过渡动画（三次缓动函数），替代传统的瞬间画面跳变，"
+        "提升UI交互的流畅度和完成度。"
+    )
+    add_body_paragraph(doc,
+        "上述视觉增强模块合计约150行代码，均在渲染层独立运行，"
+        "不影响AI决策逻辑与游戏核心状态机，体现了「表现层与逻辑层分离」的工程原则。"
+    )
+
     # 实施例结论
     add_step_header(doc, "实施例结论")
 
@@ -572,7 +641,7 @@ def main():
     add_patent_body(doc)
 
     # 保存
-    output_path = "/home/lidio/Tetris_Python/商喜庆_2026春季实践课程报告_优化版.docx"
+    output_path = "/home/lidio/Tetris_Python/商喜庆_2026春季实践课程报告_优化版v2.docx"
     doc.save(output_path)
     print(f"优化版报告已保存至: {output_path}")
 

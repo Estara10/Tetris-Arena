@@ -2,6 +2,7 @@ import pygame
 
 from game_modes import AI_LEVELS, AI_LEVEL_ORDER, GAME_MODES
 from settings import GameConfig
+from ui_primitives import draw_soft_glow, lerp_color
 
 
 MODE_META = {
@@ -34,21 +35,7 @@ LEVEL_META = {
 
 
 def _lerp_color(color_a, color_b, ratio: float):
-    """
-    根据给定的比例在两个 RGB 颜色组间插值。
-
-    参数:
-    color_a (tuple): 颜色起始点
-    color_b (tuple): 颜色终结处
-    ratio (float): 取值 (0-1)，接近0偏A，1偏B
-
-    返回:
-    tuple: 生成的新颜色RGB组
-    """
-    return tuple(
-        int(left + (right - left) * ratio)
-        for left, right in zip(color_a, color_b)
-    )
+    return lerp_color(color_a, color_b, ratio)
 
 
 def _wrap_text(font, text: str, max_width: int):

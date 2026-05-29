@@ -7,12 +7,14 @@ import pygame
 
 from ai_controller import generate_candidates
 from dqn_model import load_inference_model
+from effects import VisualEffects
 from game_modes import MatchMode
 from next_state_features import NEXT_STATE_AUX_FEATURE_COUNT, extract_next_state_features
 from piece_sequence import SharedShapeSequence
 from settings import GameConfig
 from shared_game_core import SharedGameCore, ArenaEntity
 from ui_fonts import build_ui_font
+from ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color, shade, tint
 
 try:
     import torch
@@ -144,6 +146,8 @@ class SharedArenaMatch:
         self.winner_id = None
         self._line_clear_effects: list[dict] = []
         self._anim_time_ms = 0
+        self.fx = VisualEffects()
+        self._fx_font = build_ui_font(self.arena_config, 30, bold=True)
 
         if self.model_enabled:
             for ent in self.entities:
@@ -152,75 +156,25 @@ class SharedArenaMatch:
             self._try_load_shared_model()
 
     def _lerp_color(self, color_a, color_b, ratio: float):
-        return tuple(
-            int(left + (right - left) * ratio)
-            for left, right in zip(color_a, color_b)
-        )
+        return lerp_color(color_a, color_b, ratio)
 
     def _tint(self, color, amount: float):
-        return tuple(
-            max(0, min(255, int(channel + (255 - channel) * amount)))
-            for channel in color
-        )
+        return tint(color, amount)
 
     def _shade(self, color, amount: float):
-        return tuple(
-            max(0, min(255, int(channel * (1.0 - amount))))
-            for channel in color
-        )
+        return shade(color, amount)
 
     def _draw_vertical_gradient(self, rect, top_color, bottom_color):
-        for offset_y in range(rect.height):
-            ratio = offset_y / max(1, rect.height - 1)
-            color = self._lerp_color(top_color, bottom_color, ratio)
-            pygame.draw.line(
-                self.screen,
-                color,
-                (rect.x, rect.y + offset_y),
-                (rect.right, rect.y + offset_y),
-            )
+        draw_vertical_gradient(self.screen, rect, top_color, bottom_color)
 
     def _draw_soft_glow(self, rect, color, spread=18, alpha=30, border_radius=8):
-        glow_surface = pygame.Surface(
-            (rect.width + spread * 2, rect.height + spread * 2),
-            pygame.SRCALPHA,
-        )
-        pygame.draw.rect(
-            glow_surface,
-            (color[0], color[1], color[2], alpha),
-            pygame.Rect(spread, spread, rect.width, rect.height),
-            border_radius=border_radius,
-        )
-        self.screen.blit(glow_surface, (rect.x - spread, rect.y - spread))
+        draw_soft_glow(self.screen, rect, color, spread, alpha, border_radius)
 
     def _draw_card(self, rect, fill_color, border_color, glow_color=None, border_radius=8):
-        shadow_surface = pygame.Surface((rect.width + 30, rect.height + 30), pygame.SRCALPHA)
-        pygame.draw.rect(
-            shadow_surface,
-            (0, 0, 0, 35),
-            pygame.Rect(15, 15, rect.width, rect.height),
-            border_radius=border_radius,
-        )
-        self.screen.blit(shadow_surface, (rect.x - 15, rect.y - 9))
-
-        if glow_color is not None:
-            self._draw_soft_glow(rect, glow_color, spread=14, alpha=22, border_radius=border_radius)
-
-        pygame.draw.rect(self.screen, fill_color, rect, border_radius=border_radius)
-        pygame.draw.rect(
-            self.screen,
-            border_color,
-            rect,
-            2,
-            border_radius=border_radius,
-        )
-        pygame.draw.rect(
-            self.screen,
-            (210, 218, 232),
-            rect.inflate(-6, -6),
-            1,
-            border_radius=max(4, border_radius - 2),
-        )
+        draw_card(self.screen, rect, fill_color, border_color,
+                  glow_color=glow_color, border_radius=border_radius,
+                  shadow_offset=(15, 9), shadow_alpha=35,
+                  inner_border_color=(210, 218, 232), inner_border_width=1)
 
     def _draw_scene_backdrop(self):
         full_rect = self.screen.get_rect()
@@ -321,8 +275,25 @@ class SharedArenaMatch:
         if not self.core.is_valid_position(piece):
             return False
 
-        cleared_before = self.core.last_cleared_rows.copy()
+        # Capture lock flash cells before locking
+        lock_cells = []
+        for row_idx, row in enumerate(piece.matrix):
+            for col_idx, cell in enumerate(row):
+                if cell == "X" and piece.y + row_idx >= 0:
+                    lock_cells.append((piece.x + col_idx, piece.y + row_idx))
+
         self.core.lock_piece(ent)
+
+        # Lock flash
+        if lock_cells:
+            flash_colors = {
+                "player": (0, 160, 180),
+                "ai1": (200, 50, 40),
+                "ai2": (210, 140, 40),
+            }
+            flash_c = flash_colors.get(ent.id, (100, 100, 120))
+            self.fx.spawn_lock_flash(lock_cells, self.cell_size, self.board_rect.x, self.board_rect.y, color=flash_c)
+
         if self.core.last_cleared_rows:
             for row_idx in self.core.last_cleared_rows:
                 self._line_clear_effects.append({
@@ -330,6 +301,7 @@ class SharedArenaMatch:
                     "start_ms": self._anim_time_ms,
                     "duration_ms": 450,
                 })
+            self._spawn_clear_effects(ent, self.core.last_cleared_rows)
         return False
 
     def _capture_line_clear_effects(self):
@@ -340,6 +312,34 @@ class SharedArenaMatch:
                     "start_ms": self._anim_time_ms,
                     "duration_ms": 450,
                 })
+            p_ent = self._get_entity("player")
+            if p_ent:
+                self._spawn_clear_effects(p_ent, self.core.last_cleared_rows)
+
+    def _spawn_clear_effects(self, ent, cleared_rows):
+        entity_colors = {
+            "player": (0, 175, 190),
+            "ai1": (210, 60, 50),
+            "ai2": (220, 150, 50),
+        }
+        color = entity_colors.get(ent.id, (180, 100, 40))
+        lines = len(cleared_rows)
+        for row_idx in cleared_rows:
+            row_py = self.board_rect.y + row_idx * self.cell_size + self.cell_size // 2
+            self.fx.spawn_line_clear_particles(
+                self.board_rect.x, row_py, self.board_rect.width, color, count=14,
+            )
+        shake = {1: 2.0, 2: 4.0, 3: 6.0, 4: 10.0}.get(lines, 4.0)
+        self.fx.trigger_shake(shake, 280 if lines < 4 else 420)
+        texts = []
+        if lines == 4:
+            texts.append(("TETRIS!", (180, 60, 0)))
+        if lines > 0:
+            texts.append((f"+{lines} lines", (25, 35, 55)))
+        text_x = self.board_rect.centerx
+        base_y = self.board_rect.y + cleared_rows[0] * self.cell_size
+        for i, (msg, clr) in enumerate(texts):
+            self.fx.spawn_floating_text(msg, text_x, base_y - i * 30, clr, 1400)
 
     def _try_load_shared_model(self):
         if torch is None:
@@ -529,6 +529,7 @@ class SharedArenaMatch:
         return float(values[0])
 
     def update(self, dt: int, _pressed_keys):
+        self.fx.update(dt)
         if self.finished or self.paused:
             return
 
@@ -784,6 +785,7 @@ class SharedArenaMatch:
         self._draw_line_clear_effects()
         self._draw_entities()
         self._draw_panel()
+        self.fx.draw(self.screen, font=self._fx_font)
 
         if self.paused and not self.finished:
             self._draw_overlay("已暂停", "按 W 或 P 继续")
@@ -795,6 +797,13 @@ class SharedArenaMatch:
                 self._draw_overlay("你的代码没有我的手速快\n菜就多练", "按 ESC 退出")
             else:
                 self._draw_overlay("人类一败涂地\n菜就多练", "按 ESC 退出")
+
+        if self.fx.is_shaking:
+            offset = self.fx.get_shake_offset()
+            temp = self.screen.copy()
+            bg = (228, 232, 242)
+            self.screen.fill(bg)
+            self.screen.blit(temp, offset)
 
     def _draw_line_clear_effects(self):
         now = self._anim_time_ms
@@ -947,17 +956,28 @@ class SharedArenaMatch:
         self.screen.blit(header_surface, (panel_rect.x + 20, panel_rect.y + 20))
 
         mins, secs = divmod(self.remaining_ms // 1000, 60)
+        urgent = self.remaining_ms < 30_000
         timer_card = pygame.Rect(panel_rect.x + 16, panel_rect.y + 50, panel_rect.width - 32, 84)
-        self._draw_card(
-            timer_card,
-            (248, 250, 255),
-            (160, 178, 210),
-            glow_color=(100, 155, 220),
-            border_radius=8,
-        )
-        t_surf = self.base_font.render(f"{mins:02d}:{secs:02d}", True, (25, 30, 48))
+
+        if urgent:
+            ratio = self.remaining_ms / 30_000
+            pulse = abs(__import__("math").sin(self._anim_time_ms * 0.008))
+            timer_fill = lerp_color((255, 235, 235), (248, 250, 255), ratio * (0.6 + 0.4 * pulse))
+            timer_border = lerp_color((220, 80, 70), (160, 178, 210), ratio)
+            timer_glow = (240, 100, 90)
+            timer_text_color = lerp_color((200, 25, 25), (80, 25, 25), ratio * (0.5 + 0.5 * pulse))
+            timer_label_color = lerp_color((200, 100, 100), (130, 140, 165), ratio)
+        else:
+            timer_fill = (248, 250, 255)
+            timer_border = (160, 178, 210)
+            timer_glow = (100, 155, 220)
+            timer_text_color = (25, 30, 48)
+            timer_label_color = (130, 140, 165)
+
+        self._draw_card(timer_card, timer_fill, timer_border, glow_color=timer_glow, border_radius=8)
+        t_surf = self.base_font.render(f"{mins:02d}:{secs:02d}", True, timer_text_color)
         t_rect = t_surf.get_rect(center=(timer_card.centerx, timer_card.centery + 4))
-        timer_label = self.panel_label_font.render("剩余时间", True, (130, 140, 165))
+        timer_label = self.panel_label_font.render("剩余时间", True, timer_label_color)
         self.screen.blit(timer_label, (timer_card.x + 18, timer_card.y + 12))
         self.screen.blit(t_surf, t_rect)
 

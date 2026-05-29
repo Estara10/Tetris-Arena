@@ -5,6 +5,7 @@ import pygame
 
 from ai_controller import AIController
 from background import Background
+from effects import VisualEffects
 from game_core import GameCore
 from game_modes import AILevel, MatchMode
 from piece_sequence import SharedShapeSequence
@@ -12,6 +13,7 @@ from player_input import PlayerInputController
 from render import Render
 from settings import GameConfig
 from ui_fonts import build_ui_font
+from ui_primitives import draw_card, draw_soft_glow, draw_vertical_gradient, lerp_color
 
 
 class VersusMatch:
@@ -112,52 +114,24 @@ class VersusMatch:
         self._processed_player_locks = self.player_core.lock_count
         self._processed_ai_locks = self.ai_core.lock_count
 
+        self.fx = VisualEffects()
+
+        self._fx_font = build_ui_font(self.config, 26, bold=True)
+
     def _lerp_color(self, color_a, color_b, ratio: float):
-        return tuple(
-            int(left + (right - left) * ratio)
-            for left, right in zip(color_a, color_b)
-        )
+        return lerp_color(color_a, color_b, ratio)
 
     def _draw_vertical_gradient(self, rect, top_color, bottom_color):
-        for offset_y in range(rect.height):
-            ratio = offset_y / max(1, rect.height - 1)
-            color = self._lerp_color(top_color, bottom_color, ratio)
-            pygame.draw.line(
-                self.screen,
-                color,
-                (rect.x, rect.y + offset_y),
-                (rect.right, rect.y + offset_y),
-            )
+        draw_vertical_gradient(self.screen, rect, top_color, bottom_color)
 
     def _draw_soft_glow(self, rect, color, spread=18, alpha=30, border_radius=8):
-        glow_surface = pygame.Surface(
-            (rect.width + spread * 2, rect.height + spread * 2),
-            pygame.SRCALPHA,
-        )
-        pygame.draw.rect(
-            glow_surface,
-            (color[0], color[1], color[2], alpha),
-            pygame.Rect(spread, spread, rect.width, rect.height),
-            border_radius=border_radius,
-        )
-        self.screen.blit(glow_surface, (rect.x - spread, rect.y - spread))
+        draw_soft_glow(self.screen, rect, color, spread, alpha, border_radius)
 
     def _draw_card(self, rect, fill_color, border_color, glow_color=None, border_radius=8):
-        shadow_surface = pygame.Surface((rect.width + 32, rect.height + 32), pygame.SRCALPHA)
-        pygame.draw.rect(
-            shadow_surface,
-            (0, 0, 0, 94),
-            pygame.Rect(16, 16, rect.width, rect.height),
-            border_radius=border_radius,
-        )
-        self.screen.blit(shadow_surface, (rect.x - 16, rect.y - 10))
-
-        if glow_color is not None:
-            self._draw_soft_glow(rect, glow_color, spread=16, alpha=36, border_radius=border_radius)
-
-        pygame.draw.rect(self.screen, fill_color, rect, border_radius=border_radius)
-        pygame.draw.rect(self.screen, (48, 62, 86), rect.inflate(-6, -6), 1, border_radius=max(4, border_radius - 2))
-        pygame.draw.rect(self.screen, border_color, rect, 2, border_radius=border_radius)
+        draw_card(self.screen, rect, fill_color, border_color,
+                  glow_color=glow_color, border_radius=border_radius,
+                  shadow_offset=(16, 10), shadow_alpha=94,
+                  inner_border_color=(48, 62, 86))
 
     def _draw_scene_backdrop(self):
         full_rect = self.screen.get_rect()
@@ -226,6 +200,8 @@ class VersusMatch:
         self._try_ai_activate_trap()
         self._update_match_result()
 
+        self.fx.update(dt)
+
     def draw(self):
         self._draw_scene_backdrop()
         self._draw_gap_background()
@@ -248,9 +224,16 @@ class VersusMatch:
         )
 
         self._draw_board_frames()
+        self.fx.draw(self.screen, font=self._fx_font)
 
         if self.finished:
             self._draw_result_overlay()
+
+        if self.fx.is_shaking:
+            offset = self.fx.get_shake_offset()
+            temp = self.screen.copy()
+            self.screen.fill((6, 9, 16))
+            self.screen.blit(temp, offset)
 
     def _update_ai_profile(self):
         action_interval_ms = self.mode.ai_action_interval_ms
@@ -332,43 +315,53 @@ class VersusMatch:
 
     def _player_info_lines(self):
         incoming_text = f"来袭垃圾：{len(self.player_core.incoming_garbage)}"
-        trap_ready = self.player_trap_energy >= self.config.versus_trap_energy_cost
-        trap_text = (
-            f"陷阱能量：{self.player_trap_energy}（C 可释放）"
-            if trap_ready
-            else f"陷阱能量：{self.player_trap_energy}/{self.config.versus_trap_energy_cost}"
-        )
+        trap_text = self._trap_bar_text(self.player_trap_energy, self.player_trap_cooldown_ms)
 
+        lines = []
         if self.mode.key == "CHALLENGE":
             target_lines = self.mode.objective_lines or 0
             remain_lines = max(0, target_lines - self.player_core.lines_cleared_total)
-            return [
-                f"挑战剩余：{remain_lines} 行",
-                incoming_text,
-                trap_text,
-                "控制：A/D/L/S，W暂停",
-            ]
+            lines.append(f"挑战剩余：{remain_lines} 行")
+        else:
+            level_label = self.ai_level.label if self.ai_level is not None else "默认"
+            lines.append(f"经典对战 · {level_label}")
 
-        level_label = self.ai_level.label if self.ai_level is not None else "默认"
-        return [
-            f"经典对战 · {level_label}",
-            incoming_text,
-            trap_text,
-            "控制：A/D/L/S，W暂停",
-        ]
+        lines.append(incoming_text)
+        lines.append(trap_text)
+
+        combo = self.player_combo
+        if combo >= 0:
+            lines.append(f"Combo x{combo + 1}" + ("  B2B!" if self.player_b2b else ""))
+        elif self.player_b2b:
+            lines.append("B2B 就绪")
+
+        lines.append("控制：A/D/L/S，W暂停")
+        return lines
 
     def _ai_info_lines(self):
         tempo_text = f"操作间隔：{self.ai_controller.action_interval_ms} ms"
         strategy_text = "策略：模型推理" if self.ai_controller.mode == "model" else "策略：启发式基线"
         incoming_text = f"来袭垃圾：{len(self.ai_core.incoming_garbage)}"
+        trap_text = self._trap_bar_text(self.ai_trap_energy, self.ai_trap_cooldown_ms)
         warning = self.ai_warning_text if self.ai_warning_ttl > 0 else "防守：消行可抵消来袭"
 
-        return [
-            strategy_text,
-            tempo_text,
-            incoming_text,
-            warning,
-        ]
+        lines = [strategy_text, tempo_text, incoming_text, trap_text]
+        combo = self.ai_combo
+        if combo >= 0:
+            lines.append(f"Combo x{combo + 1}" + ("  B2B!" if self.ai_b2b else ""))
+        elif self.ai_b2b:
+            lines.append("B2B 就绪")
+        lines.append(warning)
+        return lines
+
+    def _trap_bar_text(self, energy: int, cooldown_ms: int) -> str:
+        cost = self.config.versus_trap_energy_cost
+        filled = min(energy, cost)
+        empty = cost - filled
+        bar = "█" * filled + "░" * empty
+        if energy >= cost and cooldown_ms <= 0:
+            return f"陷阱 [{bar}]  C 释放"
+        return f"陷阱 [{bar}]  {energy}/{cost}"
 
     def _overlay_hint(self, core: GameCore, waiting_for: str):
         if core.state == "PAUSED":
@@ -395,10 +388,55 @@ class VersusMatch:
     def _on_lock_resolved(self, is_player: bool, lines_cleared: int):
         core = self.player_core if is_player else self.ai_core
         owner = "玩家" if is_player else "AI"
+        board_rect = self.left_rect if is_player else self.right_rect
+
+        # Lock flash
+        if core.last_locked_cells:
+            self.fx.spawn_lock_flash(
+                core.last_locked_cells,
+                self.config.cell_size,
+                board_rect.x,
+                board_rect.y,
+            )
 
         if lines_cleared > 0:
             self._update_combo_b2b(is_player, lines_cleared)
             self._gain_trap_energy(is_player, lines_cleared)
+
+            # Particle burst on each cleared row
+            for row_idx in core.last_cleared_rows:
+                row_py = board_rect.y + row_idx * self.config.cell_size + self.config.cell_size // 2
+                self.fx.spawn_line_clear_particles(
+                    board_rect.x,
+                    row_py,
+                    board_rect.width,
+                    (255, 255, 200),
+                    count=12,
+                )
+
+            # Screen shake proportional to lines cleared
+            shake_power = {1: 2.0, 2: 4.0, 3: 6.0, 4: 10.0}.get(lines_cleared, 4.0)
+            self.fx.trigger_shake(shake_power, 280 if lines_cleared < 4 else 420)
+
+            # Floating text
+            combo = self.player_combo if is_player else self.ai_combo
+            texts = []
+            if lines_cleared == 4:
+                texts.append(("TETRIS!", (255, 255, 100)))
+            if combo >= 1:
+                texts.append((f"COMBO x{combo + 1}", (255, 200, 100)))
+            b2b = self.player_b2b if is_player else self.ai_b2b
+            if b2b and lines_cleared == 4:
+                texts.append(("B2B!", (255, 150, 255)))
+
+            earned = core.score_mapping.get(lines_cleared, 0)
+            if earned > 0:
+                texts.append((f"+{earned}", (255, 255, 255)))
+
+            text_x = board_rect.centerx
+            text_y = board_rect.y + (core.last_cleared_rows[0] if core.last_cleared_rows else 10) * self.config.cell_size
+            for i, (msg, clr) in enumerate(texts):
+                self.fx.spawn_floating_text(msg, text_x, text_y - i * 32, clr, 1400)
         else:
             if is_player:
                 self.player_combo = -1

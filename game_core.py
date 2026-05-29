@@ -28,6 +28,8 @@ class GameCore:
         self.score = 0
         self.lines_cleared_total = 0
         self.last_cleared_lines = 0
+        self.last_cleared_rows: list[int] = []
+        self.last_locked_cells: list[tuple[int, int]] = []
         self.lock_count = 0
         self.current_piece = None
         self.next_piece = None
@@ -55,6 +57,8 @@ class GameCore:
         self.score = 0
         self.lines_cleared_total = 0
         self.last_cleared_lines = 0
+        self.last_cleared_rows = []
+        self.last_locked_cells = []
         self.lock_count = 0
         self.state = "RUNNING"
         self.fall_time = 0
@@ -136,6 +140,7 @@ class GameCore:
         之后调用 clear_lines() 检查是否有可以消除的行，
         最后调用 spawn_piece() 生成新的方块继续循环。
         """
+        self.last_locked_cells = []
         for row_idx, row in enumerate(self.current_piece.matrix):
             for col_idx, cell in enumerate(row):
                 if cell != "X":
@@ -145,6 +150,7 @@ class GameCore:
                 board_y = self.current_piece.y + row_idx
                 if board_y >= 0:
                     self.grid[board_y][board_x] = self.current_piece.shape_name
+                    self.last_locked_cells.append((board_x, board_y))
 
         self.clear_lines()
         if getattr(self.config, "shared_arena_score_on_lock", False):
@@ -160,9 +166,11 @@ class GameCore:
         最后根据消除的行数发放对应的分数。
         返回当次消除的总行数。
         """
-        new_grid = [row for row in self.grid if 0 in row]
-        lines_cleared = self.config.grid_rows - len(new_grid)
+        full_row_indices = [i for i, row in enumerate(self.grid) if 0 not in row]
+        new_grid = [row for i, row in enumerate(self.grid) if i not in full_row_indices]
+        lines_cleared = len(full_row_indices)
         self.last_cleared_lines = lines_cleared
+        self.last_cleared_rows = full_row_indices
 
         if lines_cleared <= 0:
             return 0
