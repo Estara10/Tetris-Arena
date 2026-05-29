@@ -1,5 +1,9 @@
-import torch
-import torch.nn as nn
+try:
+    import torch
+    import torch.nn as nn
+except Exception:  # pragma: no cover
+    torch = None
+    nn = None
 
 from deep_q_network import DeepQNetwork
 
