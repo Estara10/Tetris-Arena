@@ -68,66 +68,167 @@
 
 ## 运行方式
 
-### 环境要求
+### ① 玩游戏（无需 torch）
 
-- Python 3.10+
-- pygame
-
-### 安装运行
+只需 Python 3.10+ 和 pygame：
 
 ```bash
-# 安装依赖
+# 1. 安装依赖
 pip install pygame
 
-# 运行游戏
+# 2. 运行游戏
 python3 main.py
 ```
 
-### 可选：AI 模型推理模式
+默认使用启发式 AI，不依赖任何模型文件。
 
-仓库已包含预训练模型（`models/` 目录），安装 torch 后即可使用：
+### ② 启用 AI 模型推理（可选）
+
+用预训练 DQN 模型替代启发式 AI，需额外安装 torch：
 
 ```bash
+# 1. 安装 torch（CPU 版即可）
 pip install torch
+
+# 2. 启用模型模式运行
 export TETRIS_AI_MODE=model
 python3 main.py
-```
 
-默认加载 `models/next_state_v3/latest_checkpoint.pth`，也可通过环境变量指定：
-
-```bash
+# 也可指定其他模型路径
 export TETRIS_AI_MODEL_PATH=models/next_state_v3/best.pt
 ```
 
-若 torch 未安装，会自动回退到启发式 AI 模式，不影响游戏运行。
+> 若 torch 未安装，自动回退到启发式 AI，不影响游戏运行。
 
-## AI 系统
+---
 
-### 启发式模式（默认）
+## AI 训练：训练自己的模型
 
-不依赖 torch，使用落点评分 + next_piece 一层前瞻搜索。无需任何模型文件。
+仓库中的预训练模型由 `scripts/train_nextstate.py` 训练得到。以下是完整的训练流程说明。
 
-### 模型推理模式
+### 训练环境要求
 
-加载训练好的 DQN 模型进行推理。支持 `cpu` / `cuda` 设备。预训练模型已包含在仓库中（`models/next_state*/`）。
+| 依赖 | 用途 | 安装命令 |
+|------|------|---------|
+| Python 3.10+ | 运行时 | — |
+| torch | 神经网络训练 | `pip install torch` |
+| pygame | 游戏环境仿真 | `pip install pygame` |
+| tensorboard（可选） | 训练曲线可视化 | `pip install tensorboard` |
+| matplotlib（可选） | 生成训练曲线图 | `pip install matplotlib` |
 
-### 强化学习训练
+> **GPU 训练**：有 NVIDIA 显卡时安装 CUDA 版 torch 可大幅加速；无 GPU 时 CPU 也能训，只是慢一些。
 
-```bash
-pip install torch
-export TETRIS_RL_WARMUP=200
-export TETRIS_RL_EVAL_EPISODES=20
-export TETRIS_RL_CURRIC_EPISODES=160
-python3 scripts/train.py --episodes 300 --seed 42 --opponent-mode heuristic --device cuda
+### 训练方法：Next-State 落点评分
+
+不同于传统 DQN（输出"左移/右移/旋转/硬降"等 5 个离散动作），本项目使用 **Next-State Value** 方法：
+
+```
+当前方块 → 枚举所有可能落点（旋转×平移，约 40~60 个候选）
+         → 每个候选提取 51 维棋盘特征
+         → MLP 神经网络对每个候选打分
+         → 选最高分的落点执行
 ```
 
-关键评估指标：
-- **Eval/AvgLines**：AI 平均每局消行数（最核心的能力指标）
-- **Eval/ClearRate**：至少消过行的对局比例
-- **Eval/AvgSteps**：平均存活步数
-- **Train/Loss**：网络训练损失
+训练算法：**Double DQN + Prioritized Experience Replay + 教师蒸馏**
 
-训练产物默认输出到 `models/` 目录。
+### 三步课程学习
+
+训练分三个阶段，逐步增加难度：
+
+| 阶段 | 回合范围 | 内容 |
+|------|---------|------|
+| **1. Solo 预训练** | 1 ~ 1200 | 对手不攻击（垃圾行=0），AI 专心学会消行和保持棋盘整洁 |
+| **2. 过渡期** | 1201 ~ 1800 | 垃圾行强度从 0% 逐渐升至 100%，对手从弱到强 |
+| **3. 完全对抗** | 1801 ~ 结束 | 正常对战，对面会攻击、会用陷阱、会加速 |
+
+同时，**教师（启发式 AI）** 在早期指导模型：训练初期 85% 概率直接采用教师的落点选择，随训练逐渐降至 5%，让模型从模仿过渡到自主决策。
+
+### 训练命令
+
+```bash
+# ===== 从头训练 =====
+python scripts/train_nextstate.py \
+    --episodes 5000 \
+    --save_dir models/next_state_v4 \
+    --device cuda
+
+# ===== 仅训 300 轮（快速验证）=====
+python scripts/train_nextstate.py \
+    --episodes 300 \
+    --save_dir models/next_state_test \
+    --device cuda
+
+# ===== 无 GPU 时用 CPU =====
+python scripts/train_nextstate.py \
+    --episodes 1000 \
+    --save_dir models/next_state_cpu \
+    --device cpu
+```
+
+### 恢复训练
+
+默认 `--resume`（自动恢复），中断后用**相同命令**即可接着训：
+
+```bash
+# 中断后，相同命令自动检测 checkpoint 并恢复
+python scripts/train_nextstate.py \
+    --save_dir models/next_state_v3 \
+    --device cuda
+
+# 强制从头开始（忽略已有 checkpoint）
+python scripts/train_nextstate.py \
+    --save_dir models/next_state_v3 \
+    --device cuda \
+    --no-resume
+```
+
+### 关键训练参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--episodes` | 5000 | 训练总回合数 |
+| `--save_dir` | `models/next_state` | 模型和日志输出目录 |
+| `--device` | 自动检测 | `cuda` 或 `cpu` |
+| `--batch_size` | 256 | 每次梯度更新的样本数 |
+| `--lr` | 1e-4 | 学习率 |
+| `--gamma` | 0.99 | 折扣因子 |
+| `--replay_capacity` | 150000 | 经验回放池大小 |
+| `--curriculum_episodes` | 1200 | 课程学习回合数 |
+| `--solo_pretrain_episodes` | 1200 | Solo 预训练回合数 |
+| `--solo_transition_episodes` | 600 | 过渡期回合数 |
+| `--teacher_prob_start` / `--teacher_prob_end` | 0.85 / 0.05 | 教师指导概率起止值 |
+| `--eval_interval` | 100 | 每隔多少回合评估一次 |
+| `--seed` | 20260404 | 随机种子 |
+
+### 训练产物
+
+训练过程中 `--save_dir` 指定目录下会生成：
+
+```
+models/next_state_v3/
+├── best.pt                  # 评估指标最优的模型
+├── last.pt                  # 最新模型
+├── latest_checkpoint.pth    # 完整 checkpoint（含优化器状态，用于 resume）
+├── history.json             # 每轮详细训练记录
+├── training_summary.json    # 最新评估摘要
+├── training_curve.png       # 训练曲线图
+└── tensorboard/             # TensorBoard 日志
+```
+
+查看训练曲线：
+
+```bash
+tensorboard --logdir models/next_state_v3/tensorboard
+```
+
+### 关键评估指标
+
+| 指标 | 含义 |
+|------|------|
+| **Eval/AvgLines** | AI 平均每局消行数（核心指标，越高越好） |
+| **Eval/ClearRate** | 至少消过行对局比例 |
+| **Eval/AvgSteps** | 平均存活步数 |
+| **Train/Loss** | 网络训练损失（应持续下降） |
 
 ## 项目结构
 
