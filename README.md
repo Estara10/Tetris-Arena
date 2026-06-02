@@ -175,9 +175,8 @@ Tetris_Python/
 │       └── shared_arena_match.py   # Arena 对战会话
 │
 ├── scripts/                     # 独立脚本
-│   ├── train.py                 #   训练入口
-│   ├── train_board.py           #   棋盘训练
-│   ├── train_nextstate.py       #   Next-state 训练
+│   ├── train.py                 #   离散动作 DQN 训练
+│   ├── train_nextstate.py       #   Next-state 落点评分训练（主用）
 │   ├── evaluate_model.py        #   模型评估
 │   ├── test_load.py             #   模型加载测试
 │   └── test_shared_load.py      #   Arena 导入测试
